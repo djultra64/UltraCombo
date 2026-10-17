@@ -10,6 +10,10 @@ void run_frame(void);                 // one video frame of CPU, disk and sound
 size_t machine_state(uint8_t *buf, bool load);   // frame-loop and I/O register state
 uint64_t machine_frame(void);         // frames run since power-on
 void machine_reset(void);             // power-cycle the cabinet
+// Netplay: emulate one frame with these inputs (BTN_* bits) and checkpoint it,
+// and power-on + boot frames identically on both sides.
+void machine_run_inputs(const uint16_t in[2], bool resim);
+void machine_netplay_reset(void);
 void to_rgb(uint32_t *dst);           // current 320x240 frame as 0x00RRGGBB
 const char *base_dir(void);           // directory of the executable, with trailing separator
 const char *find_data(const char *name, char *buf, size_t n);

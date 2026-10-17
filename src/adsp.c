@@ -790,10 +790,13 @@ void adsp_pulse_irq(int line)
 // index register, which nothing but the autobuffer (or an interrupt) changes,
 // and every iteration leaves the same state behind. Once it has looped, the
 // DSP may skip ahead to the next transmitted sample.
+static uint16_t poll_yes[8], poll_no[32];
+static int poll_nyes, poll_nno;     // cleared by adsp_init
+
 static bool is_poll_loop(uint16_t top, uint16_t jump_at)
 {
-    static uint16_t yes[8], no[32];
-    static int nyes, nno;
+    uint16_t *yes = poll_yes, *no = poll_no;
+    int nyes = poll_nyes, nno = poll_nno;
     for (int i = 0; i < nyes; i++) if (yes[i] == top) return true;
     for (int i = 0; i < nno && i < 32; i++) if (no[i] == top) return false;
 
@@ -810,6 +813,7 @@ static bool is_poll_loop(uint16_t top, uint16_t jump_at)
         !(a.loop_sp && a.loop_end >= top && a.loop_end <= jump_at);
     if (match) { if (nyes < 8) yes[nyes++] = top; }
     else no[nno++ % 32] = top;
+    poll_nyes = nyes; poll_nno = nno;
     return match;
 }
 
@@ -1014,6 +1018,7 @@ void adsp_run(int cycles)
 void adsp_init(const adsp_hooks_t *hooks)
 {
     memset(&a, 0, sizeof(a));
+    poll_nyes = poll_nno = 0;
     a.h = *hooks;
     (void)bitrev;
 }

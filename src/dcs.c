@@ -128,16 +128,23 @@ bool sound_init(const char *rom_dir)
         ok &= load_rom(rom_dir, names[i], (uint32_t)i * 0x100000u);
     if (!ok) fprintf(stderr, "dcs: sound ROMs missing, running silent\n");
 
-    adsp_hooks_t h = {
+    sound_power_on();
+    return ok;
+}
+
+// Everything back to power-on, including the DSP's RAM (identical on every machine).
+void sound_power_on(void)
+{
+    static const adsp_hooks_t h = {
         .pm_read = pm_read, .pm_write = pm_write,
         .dm_read = dm_read, .dm_write = dm_write,
         .sample_out = sample_out, .sample_rate = sample_rate,
         .sysctl_reboot = reboot,
     };
     adsp_init(&h);
+    memset(&d, 0, sizeof d);
     d.rate = 31250;
     board_reset();
-    return ok;
 }
 
 void sound_reset_w(bool state)

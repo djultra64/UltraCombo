@@ -49,6 +49,28 @@ static struct {
 } d;
 
 uint8_t ide_dirty[IDE_TRACK_PAGES];
+static __typeof__(d) d_power_on;     // controller state right after ide_open
+
+void ide_power_on(void)
+{
+    uint64_t size = d.size;
+    d = d_power_on;
+    d.size = size;
+}
+
+// Cheap identity of the disk image: its size plus 4 KB from every 4 MB.
+uint64_t ide_image_id(void)
+{
+    uint64_t h = 0xcbf29ce484222325ull ^ d.size;
+    static uint8_t buf[4096];
+    for (uint64_t off = 0; off + sizeof buf <= d.size; off += 4u << 20) {
+        if (off < IDE_TRACK_BYTES) continue;              // settings: synced separately
+        if (fseek64(disk, (long long)off, SEEK_SET) || fread(buf, 1, sizeof buf, disk) != sizeof buf) break;
+        for (size_t i = 0; i < sizeof buf; i++) { h ^= buf[i]; h *= 0x100000001b3ull; }
+    }
+    cache_at = ~0ull;
+    return h;
+}
 
 uint8_t *ide_tracked(void) { return tracked; }
 
@@ -165,6 +187,7 @@ bool ide_open(const char *path, uint32_t cyls, uint32_t heads, uint32_t secs, in
     d.status = ST_DRDY | ST_DSC;
     d.count = 1; d.sector = 1;
     d.irq_delay = -1;
+    d_power_on = d;
     return true;
 }
 

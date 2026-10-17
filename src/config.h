@@ -43,6 +43,13 @@ typedef struct {
     int  state_slot;           // 1-9
     bool input_display;
     bool training;             // health refill + timer freeze
+    // the board's DIP switches
+    bool free_play;
+    int  blood;                // 0 none, 1 low, 2 medium, 3 high
+    bool finishing_moves, demo_sounds;
+    char net_address[1024];    // last host joined
+    int  net_port;
+    int  net_delay;            // frames of input delay (0-4)
 
     SDL_Scancode keys[2][NBUTTONS];
     SDL_Scancode hotkeys[NHOTKEYS];
@@ -55,5 +62,7 @@ extern config_t cfg;
 
 // Load from `path`, writing a commented default file there if it does not exist.
 void config_load(const char *path);
+// The DIP switch word for the current settings.
+uint32_t config_dsw(void);
 // Write the current settings back (to the path given to config_load).
 bool config_save(void);

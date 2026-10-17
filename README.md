@@ -44,7 +44,13 @@ Windows builds emulate identically (same state after the same inputs).
 | Start | 1 | 2 | Start |
 | Coin | 5 | 6 | Back |
 
-With `auto_coin` on (the default), Start inserts the coins it needs.
+The game runs in **free play** by default (the board's coinage DIP
+switch): from the attract demo, the first Start goes to the title screen
+and the second starts the game, as on a free-play cabinet. With free play
+off, `auto_coin` makes Start insert the coins it needs. Blood level,
+finishing moves and demo sounds are in `ki2.ini` too ([game]); the game
+reads these switches at power-on, so changes apply after Reset.
+
 The first pad connected is player 1, the second player 2.
 
 | Hotkey | |
@@ -99,6 +105,29 @@ the side the dummy will be on.
 
 F3 shows both players' recent inputs in numpad notation (6 = forward when
 facing right, 2 = down, 5 = neutral) with the number of frames each was held.
+
+## Netplay
+
+Two players over the internet with rollback netcode: your own inputs
+respond immediately, the opponent's are predicted and corrected, and the
+game stays perfectly in sync. Linux and Windows can play each other.
+
+- **Host:** menu → Netplay → *Host a game* (or `ki2 --host`). Your UDP port
+  (`port` in ki2.ini, default 7845) must be reachable: forward it on your
+  router, or both use a VPN such as Tailscale or ZeroTier.
+- **Join:** menu → Netplay → *Address* (type the host's IP or name), then
+  *Join a game* (or `ki2 --join HOST[:PORT]`).
+
+Both players need the same build, ROM and disk image (checked when
+connecting); the host's settings sectors and DIP switches are used. When
+the other player connects, both games restart at the title screen. You
+play with your usual controls whichever side you are on. The corner shows
+ping, input delay and the last rollback.
+
+**Input delay** (default 2 frames) trades a little responsiveness for
+fewer corrections: 1-2 for nearby players, 3-4 across a continent.
+During netplay the game cannot be paused, rewound or reloaded, and both
+sides run at the arcade's 58.96 Hz.
 
 ## Save states, rewind and run-ahead
 

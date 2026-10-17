@@ -227,6 +227,25 @@ static uint64_t fnv(uint64_t h, const void *data, size_t n)
 
 static uint64_t rom_id(void) { return fnv(0xcbf29ce484222325ull, rom, ROM_SIZE); }
 
+// Builds that can play together: same ROM, same recompiled code, same state layout.
+uint64_t state_compat_id(void)
+{
+    uint64_t h = rom_id() ^ ((uint64_t)core_len << 32) ^ FILE_VERSION;
+    h = fnv(h, &rec_nfuncs, sizeof rec_nfuncs);
+    h = fnv(h, &rec_nlabels, sizeof rec_nlabels);
+    h = fnv(h, rec_image, rec_image_words * 4);
+    h = fnv(h, &rec_enabled, sizeof rec_enabled);
+    return h;
+}
+
+// Fast check for netplay: CPU/DSP/disk state plus the game's variables page range.
+uint64_t state_quick_hash(void)
+{
+    core_io(core_tmp, false);
+    uint64_t h = fnv(0xcbf29ce484222325ull, core_tmp, core_len);
+    return fnv(h, ram2 + 0x7f0000, 0x10000);
+}
+
 uint64_t state_hash(void)
 {
     uint64_t h = 0xcbf29ce484222325ull;

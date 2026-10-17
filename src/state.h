@@ -28,3 +28,5 @@ bool state_save_file(const char *path);
 bool state_load_file(const char *path);   // also clears the rewind history
 
 uint64_t state_hash(void);          // of the full machine state, for determinism tests
+uint64_t state_quick_hash(void);    // CPU/devices + the game's variables (cheap)
+uint64_t state_compat_id(void);     // equal for builds that emulate identically

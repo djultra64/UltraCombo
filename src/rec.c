@@ -39,6 +39,14 @@ static bool func_matches(uint32_t f)
 
 static uint64_t last_rebuild;
 
+// As at program start (machine power-on): identical on every machine.
+void rec_reset(void)
+{
+    rec_code_gen = 1;
+    last_rebuild = 0;
+    rec_forget();
+}
+
 // Forget everything learned about RAM contents (after loading a state file).
 void rec_forget(void)
 {

@@ -21,6 +21,7 @@ typedef struct {
 
 static const char *const scale_names[] = { "fit", "integer", "stretch", 0 };
 static const char *const pacing_names[] = { "auto", "audio", "vsync", 0 };
+static const char *const blood_names[] = { "none", "low", "medium", "high", 0 };
 static const char *const filter_names[] = { "sharp", "smooth", "scanlines", "crt", 0 };
 
 static const char *const button_names[NBUTTONS] = {
@@ -82,6 +83,14 @@ static void build_table(void)
     add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
     add("system", "training", T_BOOL, &cfg.training, "no",
         "training mode: health refills after each combo, the clock stops (start a 2-player game for a dummy)", 0);
+    add("game", "free_play", T_BOOL, &cfg.free_play, "yes", "no coins needed: just press Start (the board's coinage DIP switch)", 0);
+    add("game", "blood", T_ENUM, &cfg.blood, "high", "none, low, medium, high", blood_names);
+    add("game", "finishing_moves", T_BOOL, &cfg.finishing_moves, "yes", "Ultra combos and No Mercy finishers", 0);
+    add("game", "demo_sounds", T_BOOL, &cfg.demo_sounds, "yes", "sound during the attract mode", 0);
+    add("netplay", "address", T_STR, cfg.net_address, "", "host to join (name or IP, optionally :port)", 0);
+    add("netplay", "port", T_INT, &cfg.net_port, "7845", "UDP port to host on (forward it on your router, or use a VPN such as Tailscale)", 0);
+    add("netplay", "input_delay", T_INT, &cfg.net_delay, "2",
+        "frames before your input takes effect; more = fewer rollbacks. 1-2 for nearby players, 3-4 far away", 0);
     add("system", "state_slot", T_INT, &cfg.state_slot, "1", "save state slot used by the hotkeys, 1-9", 0);
 
     for (int p = 0; p < 2; p++)
@@ -240,4 +249,16 @@ void config_load(const char *path)
             fprintf(stderr, "%s:%d: unknown setting [%s] %s\n", path, n, sec, k);
     }
     fclose(f);
+}
+
+// KI2 DIP switches (MAME's kinst2 layout): bits 0-1 blood level, 2 demo sounds,
+// 3 finishing moves, 4 warning screen, 8 coinage from switches, 9-13 coinage.
+uint32_t config_dsw(void)
+{
+    uint32_t d = 0xffffffffu;
+    d = (d & ~3u) | (uint32_t)(cfg.blood & 3);
+    if (!cfg.demo_sounds) d &= ~0x04u;
+    if (!cfg.finishing_moves) d &= ~0x08u;
+    if (cfg.free_play) d = (d & ~0x3e00u) | 0x3000u;          // USA - free play
+    return d;
 }

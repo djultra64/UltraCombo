@@ -12,3 +12,4 @@ void   sound_run(int cycles);          // advance the sound DSP (10 MHz cycles)
 double sound_rate(void);               // current output sample rate in Hz
 int    sound_fetch(int16_t *out, int max);
 size_t sound_state(uint8_t *buf, bool load);   // board + DSP, for save states
+void   sound_power_on(void);

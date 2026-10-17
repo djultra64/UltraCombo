@@ -53,11 +53,15 @@ static void cover_save(void)
 typedef struct { uint32_t pc; int8_t cnt_reg; int16_t cnt_imm; } poll_loop_t;
 static poll_loop_t idle_loop;   // loop that set cpu_idle
 
+static poll_loop_t poll_yes[16];
+static uint32_t poll_no[64];
+static int poll_nyes, poll_nno;     // cleared at reset: decisions depend on RAM contents
+
 static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
 {
-    static poll_loop_t yes[16];
-    static uint32_t no[64];
-    static int nyes, nno;
+    poll_loop_t *yes = poll_yes;
+    uint32_t *no = poll_no;
+    int nyes = poll_nyes, nno = poll_nno;
     for (int i = 0; i < nyes; i++) if (yes[i].pc == pc) { idle_loop = yes[i]; return true; }
     for (int i = 0; i < nno && i < 64; i++) if (no[i] == pc) return false;
 
@@ -84,6 +88,7 @@ static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
     }
     if (match) { if (nyes < 16) yes[nyes++] = l; idle_loop = l; }
     else no[nno++ % 64] = pc;
+    poll_nyes = nyes; poll_nno = nno;
     return match;
 }
 
@@ -842,6 +847,7 @@ static void exec(uint32_t op)
 void cpu_reset(void)
 {
     memset(&cpu, 0, sizeof(cpu));
+    poll_nyes = poll_nno = 0;
     cpu.pc = 0xbfc00000u;
     cpu.npc = cpu.pc + 4;
     cpu.cp0[CP0_STATUS] = SR_BEV | SR_ERL;

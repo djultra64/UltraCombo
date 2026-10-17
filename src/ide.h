@@ -18,6 +18,8 @@ extern uint8_t ide_dirty[IDE_TRACK_PAGES];
 uint8_t *ide_tracked(void);              // in-memory copy of the first IDE_TRACK_BYTES
 void ide_tracked_changed(void);          // the copy was modified (state load/rewind)
 void ide_flush(void);                    // write the copy back to the image file
+void ide_power_on(void);                 // controller back to its state after ide_open
+uint64_t ide_image_id(void);             // identity of the image (for netplay)
 
 // Save state: copy the controller state to/from buf (NULL: just return the size).
 size_t ide_state(uint8_t *buf, bool load);

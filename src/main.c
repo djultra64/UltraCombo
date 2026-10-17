@@ -7,6 +7,8 @@
 #include "rec.h"
 #include "sound.h"
 #include "state.h"
+#include "net.h"
+#include "netplay.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,13 +74,12 @@ void machine_reset(void)
 {
     memset(ram, 0, RAM_SIZE);
     memset(&m, 0, sizeof m);
-    hw = (hw_t){ .p1 = 0xffffffffu, .p2 = 0xffffffffu, .volume = 0xffffffffu, .dsw = 0xffffffffu };
-    sound_reset_w(false);     // DCS reset pulse
-    sound_reset_w(true);
-    ide_devctl(4);            // drive software reset
-    ide_devctl(0);
+    uint32_t dsw = hw.dsw;     // switches stay as set
+    hw = (hw_t){ .p1 = 0xffffffffu, .p2 = 0xffffffffu, .volume = 0xffffffffu, .dsw = dsw };
+    sound_power_on();
+    ide_power_on();
     cpu_reset();
-    rec_forget();
+    rec_reset();
     state_init();
 }
 
@@ -168,6 +169,77 @@ static void apply_script(int frame)
             *script[i].b->port &= ~script[i].b->bit;
 }
 
+/* Netplay callbacks shared with the frontend: emulate with explicit inputs. */
+void machine_run_inputs(const uint16_t in[2], bool resim)
+{
+    hw.p1 = 0xffffffffu & ~(uint32_t)(in[0] & 0x0fff);
+    hw.p2 = 0xffffffffu & ~(uint32_t)(in[1] & 0x0fff);
+    run_frame();
+    static int desync_at = -1;                      // testing: KI2_DESYNC_AT=frame breaks this side
+    if (desync_at < 0) desync_at = getenv("KI2_DESYNC_AT") ? atoi(getenv("KI2_DESYNC_AT")) : 0;
+    if (desync_at && machine_frame() == (uint64_t)desync_at && !resim) { ram2[0x7f0010] ^= 0x55; ram_touch(&ram2[0x7f0010]); }
+    state_checkpoint();
+    if (resim) { int16_t junk[4096]; while (sound_fetch(junk, 4096) > 0) {} }
+}
+
+void machine_netplay_reset(void)
+{
+    machine_reset();
+    for (int i = 0; i < NP_BOOT_FRAMES; i++) {
+        hw.p1 = hw.p2 = 0xffffffffu;
+        run_frame();
+    }
+    state_init();
+}
+
+int net_warmup;     // testing: play locally (with rewind history) until the session starts
+
+static int headless_netplay(int end, const char *host_port, const char *join, int delay, int fps,
+                            int lat, int jit, int loss)
+{
+    netplay_set_callbacks(machine_run_inputs, machine_netplay_reset);
+    net_simulate(lat, jit, loss);
+    bool ok;
+    if (host_port) ok = netplay_host(atoi(host_port), delay);
+    else {
+        char h[256]; int port = NP_DEFAULT_PORT;
+        snprintf(h, sizeof h, "%s", join);
+        char *c = strrchr(h, ':');
+        if (c) { *c = 0; port = atoi(c + 1); }
+        ok = netplay_join(h, port, delay);
+    }
+    if (!ok) { fprintf(stderr, "%s\n", netplay_take_error()); return 1; }
+    netplay_set_end((uint32_t)end);
+    int me = host_port ? 0 : 1;
+    double next = net_now_ms();
+    uint32_t last_report = 0;
+    if (net_warmup) state_set_history((size_t)256 << 20);
+    for (;;) {
+        if (net_warmup && !netplay_running()) { hw.p1 = hw.p2 = 0xffffffffu; run_frame(); state_checkpoint(); }
+        // this side's buttons from the script, for the frame the input will be used in
+        uint32_t f = netplay_input_frame();
+        apply_script((int)f + 1);
+        uint16_t local = (uint16_t)(~(me ? hw.p2 : hw.p1) & 0x0fff);
+        netplay_update(local);
+        const char *err = netplay_take_error();
+        if (err) { fprintf(stderr, "%s\n", err); return 2; }
+        if (netplay_running() && netplay_confirmed() >= (uint32_t)end) {
+            fprintf(stderr, "state hash %016llx at frame %llu\n", (unsigned long long)state_hash(), (unsigned long long)machine_frame());
+            for (int i = 0; i < 30; i++) { netplay_update(0); SDL_Delay(10); }   // let the other side confirm too
+            netplay_stop();
+            return 0;
+        }
+        if (netplay_running() && machine_frame() / 600 != last_report) {
+            last_report = (uint32_t)(machine_frame() / 600);
+            fprintf(stderr, "%s\n", netplay_status());
+        }
+        next += 1000.0 / fps;
+        double now = net_now_ms();
+        if (next > now) SDL_Delay((uint32_t)(next - now));
+        else if (now - next > 100) next = now;
+    }
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -183,6 +255,11 @@ static void usage(void)
         "  --load P        start from state file P\n"
         "  --rewind-test N headless: every N frames rewind N, replay, and check the state matches\n"
         "  --runahead N    headless: run N frames ahead and roll back after each frame\n"
+        "  --host [PORT]   host a netplay game (default port from ki2.ini, 7845)\n"
+        "  --join HOST[:PORT]  join a netplay game\n"
+        "  --net-host PORT / --net-join HOST:PORT\n"
+        "                  headless netplay test: play this side of --script until frame N\n"
+        "  --net-delay N, --net-fps F, --net-sim LATENCY:JITTER:LOSS%%  (testing)\n"
         "Settings, key bindings and hotkeys are in ki2.ini beside the executable\n"
         "(written with defaults on first run). See README.md.\n");
 }
@@ -204,6 +281,9 @@ int main(int argc, char **argv)
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     int save_at = 0, rewind_test = 0, runahead = 0;
+    const char *net_host = NULL, *net_join = NULL;
+    int net_delay = 2, net_fps = 60, net_lat = 0, net_jit = 0, net_loss = 0;
+    extern int net_warmup;
     const char *save_path = NULL, *load_path = NULL;
     uint32_t dis_addr = 0;
     for (int i = 1; i < argc; i++) {
@@ -219,6 +299,14 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
         else if (!strcmp(argv[i], "--rewind-test") && i + 1 < argc) rewind_test = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--runahead") && i + 1 < argc) runahead = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--host")) { extern const char *opt_net_host; opt_net_host = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : ""; }
+        else if (!strcmp(argv[i], "--join") && i + 1 < argc) { extern const char *opt_net_join; opt_net_join = argv[++i]; }
+        else if (!strcmp(argv[i], "--net-host") && i + 1 < argc) net_host = argv[++i];
+        else if (!strcmp(argv[i], "--net-join") && i + 1 < argc) net_join = argv[++i];
+        else if (!strcmp(argv[i], "--net-delay") && i + 1 < argc) net_delay = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--net-fps") && i + 1 < argc) net_fps = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--net-warmup")) net_warmup = 1;
+        else if (!strcmp(argv[i], "--net-sim") && i + 1 < argc) sscanf(argv[++i], "%d:%d:%d", &net_lat, &net_jit, &net_loss);
         else if (!strcmp(argv[i], "--dis") && i + 2 < argc) { dis_addr = (uint32_t)strtoul(argv[++i], 0, 16); dis_count = atoi(argv[++i]); }
         else { usage(); return 1; }
     }
@@ -252,6 +340,7 @@ int main(int argc, char **argv)
         if (slash) { memmove(snd_buf, u10, (size_t)(slash - u10)); snd_buf[slash - u10] = 0; sound_dir = snd_buf; }
     }
     sound_init(sound_dir);
+    hw.dsw = getenv("KI2_DSW") ? (uint32_t)strtoul(getenv("KI2_DSW"), 0, 16) : config_dsw();
     cpu_reset();
     rec_init();
     // KI2_INTERP_HIST=file: where the interpreter still runs (missing entry points)
@@ -262,6 +351,21 @@ int main(int argc, char **argv)
         if (!state_load_file(load_path)) { fprintf(stderr, "%s: cannot load state\n", load_path); return 1; }
         fprintf(stderr, "loaded %s at frame %llu\n", load_path, (unsigned long long)machine_frame());
     }
+
+    if (getenv("KI2_RESET_TEST")) {         // testing: does anything survive a power-on reset?
+        int n = atoi(getenv("KI2_RESET_TEST"));
+        for (int i = 0; i < n; i++) run_frame();
+        machine_netplay_reset();
+        fprintf(stderr, "after reset: hash %016llx quick %016llx\n", (unsigned long long)state_hash(), (unsigned long long)state_quick_hash());
+        FILE *o = fopen("reset_ram.bin", "wb"); fwrite(ram, 1, RAM_SIZE, o); fclose(o);
+        static uint8_t core[1 << 20];
+        size_t n0 = cpu_state(core, false), n1 = rec_state(core + n0, false), n2 = ide_state(core + n0 + n1, false);
+        size_t n3 = sound_state(core + n0 + n1 + n2, false), n4 = machine_state(core + n0 + n1 + n2 + n3, false);
+        o = fopen("reset_core.bin", "wb"); fwrite(core, 1, n0 + n1 + n2 + n3 + n4, o); fclose(o);
+        fprintf(stderr, "core parts: cpu %zu rec %zu ide %zu sound %zu machine %zu\n", n0, n1, n2, n3, n4);
+        return 0;
+    }
+    if (headless && (net_host || net_join)) return headless_netplay(headless, net_host, net_join, net_delay, net_fps, net_lat, net_jit, net_loss);
 
     if (headless) {
         if (rewind_test || getenv("KI2_HISTORY")) state_set_history((size_t)1 << 30);
