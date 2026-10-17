@@ -2,6 +2,7 @@
 // Little-endian, 32-bit kernel addressing (KSEG0/KSEG1 direct mapped).
 #include "cpu.h"
 #include "mem.h"
+#include "rec.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,8 +25,25 @@ bool cpu_idle;
 
 // Thrown-exception mechanism: memory helpers set this and the step aborts.
 static bool exc_raised;
-static bool irq_dirty = true;   // recheck pending interrupts before the next instruction
+bool irq_dirty = true;          // recheck pending interrupts before the next instruction
 static bool tlb_refill;
+
+// Coverage (KI2_COVER=file): one bit per executed RAM word, plus a count of
+// stores that hit words already executed (self-modifying code / overlays).
+static uint8_t *cover, *cover_lead;   // executed words; words reached by a jump
+static uint64_t cover_smc;
+#define COVER_IDX(pa) ((pa) < 0x08000000u ? (pa) >> 2 : (((pa) - 0x08000000u) + RAM0_SIZE) >> 2)
+static inline bool cover_hit(uint32_t pa) { uint32_t i = COVER_IDX(pa); return cover[i >> 3] >> (i & 7) & 1; }
+
+static void cover_save(void)
+{
+    FILE *f = fopen(getenv("KI2_COVER"), "wb");
+    if (!f) return;
+    fwrite(cover, 1, (RAM0_SIZE + RAM2_SIZE) / 32, f);
+    fwrite(cover_lead, 1, (RAM0_SIZE + RAM2_SIZE) / 32, f);
+    fclose(f);
+    fprintf(stderr, "cover: %llu stores into executed code\n", (unsigned long long)cover_smc);
+}
 
 
 // Recognise "1: mfc0 rX,Cause; nop; andi rX,rX,IPmask; beq/bne rX,zero,1b; <slot>"
@@ -146,6 +164,25 @@ static inline bool irq_pending(void)
 /* Address translation                                              */
 /* ---------------------------------------------------------------- */
 
+// Translations of recently used mapped pages, refilled from the TLB on a
+// miss and flushed whenever the TLB or the current ASID changes.
+tlbc_t tlbc[TLBC_SIZE];
+
+static void tlbc_flush(void) { memset(tlbc, 0, sizeof tlbc); }
+
+static void tlbc_fill(uint32_t va, uint32_t pa, bool dirty)
+{
+    tlbc_t *e = &tlbc[(va >> 12) & (TLBC_SIZE - 1)];
+    uint32_t page = pa & ~0xfffu;
+    e->tag = (va >> 12) + 1;
+    e->pa = page;
+    e->dirty = dirty;
+    e->rd = mem_ptr(page);
+    bool ram = e->rd && page < 0x1fc00000u;
+    bool code = page < rec_code_lo + rec_code_size && page + 0x1000 > rec_code_lo;
+    e->wr = (dirty && ram && !code) ? e->rd : 0;
+}
+
 static bool tlb_lookup(uint32_t va, bool write, uint32_t *pa)
 {
     uint8_t asid = cpu.cp0[CP0_ENTRYHI] & 0xff;
@@ -168,6 +205,7 @@ static bool tlb_lookup(uint32_t va, bool write, uint32_t *pa)
         }
         uint32_t pfn = (uint32_t)((lo >> 6) & 0xffffff) << 12;
         *pa = pfn | (va & (half - 1));
+        tlbc_fill(va, *pa, (lo & 4) != 0);
         return true;
     }
     tlb_refill = true;
@@ -178,6 +216,8 @@ static bool tlb_lookup(uint32_t va, bool write, uint32_t *pa)
 static inline bool translate(uint32_t va, bool write, uint32_t *pa)
 {
     if ((va & 0xc0000000u) == 0x80000000u) { *pa = va & 0x1fffffffu; return true; }
+    tlbc_t *e = &tlbc[(va >> 12) & (TLBC_SIZE - 1)];
+    if (e->tag == (va >> 12) + 1 && (!write || e->dirty)) { *pa = e->pa | (va & 0xfff); return true; }
     return tlb_lookup(va, write, pa);
 }
 
@@ -186,6 +226,13 @@ static inline bool translate(uint32_t va, bool write, uint32_t *pa)
 /* ---------------------------------------------------------------- */
 
 static uint32_t last_unmapped_report;
+
+static void cover_note_smc(uint32_t pa)
+{
+    if (cover_smc++ < 20) fprintf(stderr, "cover: store to executed code pa=%08x pc=%08x\n", pa, cpu.cur_pc);
+    uint32_t i = COVER_IDX(pa);
+    cover[i >> 3] &= ~(1u << (i & 7));
+}
 
 #define DEF_LOAD(name, type, size)                                          \
     static inline type name(uint32_t va)                                    \
@@ -211,6 +258,8 @@ static uint32_t last_unmapped_report;
         uint8_t *p = mem_ptr(pa);                                           \
         if (p) {                                                            \
             if (pa >= 0x1fc00000u) return; /* ROM */                        \
+            if (cover && cover_hit(pa)) cover_note_smc(pa);                 \
+            if (pa - rec_code_lo < rec_code_size) rec_code_gen++;           \
             memcpy(p, &v, size); return;                                    \
         }                                                                   \
         if (size == 8) {                                                    \
@@ -305,6 +354,10 @@ static void cp0_write(int reg, uint64_t v)
         irq_dirty = true;
         break;
     case CP0_STATUS: cpu.cp0[reg] = (uint32_t)v; irq_dirty = true; break;
+    case CP0_ENTRYHI:
+        if ((cpu.cp0[reg] ^ v) & 0xff) tlbc_flush();
+        cpu.cp0[reg] = v;
+        break;
     case CP0_CONFIG: cpu.cp0[reg] = (cpu.cp0[reg] & ~7ull) | (v & 7); break;
     default: cpu.cp0[reg] = v; break;
     }
@@ -312,6 +365,7 @@ static void cp0_write(int reg, uint64_t v)
 
 static void tlb_write(int idx)
 {
+    tlbc_flush();
     tlb_entry_t *e = &cpu.tlb[idx % 48];
     e->mask = cpu.cp0[CP0_PAGEMASK];
     e->hi = cpu.cp0[CP0_ENTRYHI] & ~(e->mask | 0x1fffull) | (cpu.cp0[CP0_ENTRYHI] & 0xff);
@@ -797,6 +851,12 @@ void cpu_reset(void)
     cpu.cp0[CP0_WIRED] = 0;
     schedule_compare();
     irq_dirty = true;
+    tlbc_flush();
+    if (getenv("KI2_COVER") && !cover) {
+        cover = calloc(1, (RAM0_SIZE + RAM2_SIZE) / 32);
+        cover_lead = calloc(1, (RAM0_SIZE + RAM2_SIZE) / 32);
+        atexit(cover_save);
+    }
 }
 
 void cpu_skip(uint64_t n)
@@ -807,6 +867,51 @@ void cpu_skip(uint64_t n)
     }
     cpu.cycles += n;
     compare_check();
+}
+
+/* ---------------------------------------------------------------- */
+/* Entry points for recompiled code (see rec.h)                     */
+/* ---------------------------------------------------------------- */
+
+bool cpu_exc;
+uint64_t rec_deadline;
+uint64_t cpu_interp_count;
+uint32_t *cpu_interp_hist;
+
+uint64_t rec_load(uint32_t va, int size, uint32_t pc, bool delay)
+{
+    cpu.cur_pc = pc; cpu.in_delay = delay; exc_raised = false;
+    uint64_t v;
+    switch (size) {
+    case 1: v = rd8(va); break;
+    case 2: v = rd16(va); break;
+    case 4: v = rd32(va); break;
+    default: v = rd64(va); break;
+    }
+    cpu_exc = exc_raised;
+    return v;
+}
+
+void rec_store(uint32_t va, uint64_t v, int size, uint32_t pc, bool delay)
+{
+    cpu.cur_pc = pc; cpu.in_delay = delay; exc_raised = false;
+    switch (size) {
+    case 1: wr8(va, (uint8_t)v); break;
+    case 2: wr16(va, (uint16_t)v); break;
+    case 4: wr32(va, (uint32_t)v); break;
+    default: wr64(va, v); break;
+    }
+    cpu_exc = exc_raised;
+}
+
+bool rec_op(uint32_t op, uint32_t pc, bool delay)
+{
+    cpu.cur_pc = pc; cpu.in_delay = delay; exc_raised = false;
+    cpu.pc = pc + 4; cpu.npc = pc + 8; cpu.next_delay = false;
+    exec(op);
+    if (exc_raised) return true;
+    if (delay) return false;
+    return irq_dirty || cpu_idle || cpu.pc != pc + 4;
 }
 
 uint64_t cpu_run(uint64_t n)
@@ -824,10 +929,26 @@ uint64_t cpu_run(uint64_t n)
             cpu.in_delay = false;
             exc_raised = false;
         }
+        if (!cpu.in_delay && rec_enabled) {
+            rec_fn_t f = rec_lookup(cpu.pc);
+            if (f) {
+                rec_deadline = end < cpu.next_compare ? end : cpu.next_compare;
+                f();
+                compare_check();
+                continue;
+            }
+        }
         cpu.next_delay = false;
         uint32_t pc = cpu.pc;
         uint32_t op = fetch(pc);
         if (!exc_raised) {
+            if (cover && (pc & 0xc0000000u) == 0x80000000u && (pc & 0x1fffffffu) < 0x08800000u) {
+                static uint32_t prev;
+                uint32_t i = COVER_IDX(pc & 0x1fffffffu);
+                cover[i >> 3] |= 1u << (i & 7);
+                if (pc != prev + 4) cover_lead[i >> 3] |= 1u << (i & 7);
+                prev = pc;
+            }
             if (cpu_trace) {
                 char buf[96];
                 fprintf(stderr, "%08x: %08x  %s\n", pc, op, cpu_disasm(pc, op, buf));
@@ -837,6 +958,8 @@ uint64_t cpu_run(uint64_t n)
             exec(op);
         }
         cpu.cycles++;
+        cpu_interp_count++;
+        if (cpu_interp_hist && (pc & 0xfff00000u) == 0x88000000u) cpu_interp_hist[(pc >> 2) & 0xffff]++;
         compare_check();
     }
     return cpu.cycles - start;

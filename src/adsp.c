@@ -61,6 +61,7 @@ static struct {
     uint16_t ifc;
     uint8_t px;
     bool idle;
+    bool polling;             // just looped in a recognised wait-for-autobuffer loop
 
     uint8_t irq_state[6], irq_latch[6];
 
@@ -750,7 +751,7 @@ static bool take_irq(int line, int index)
     pc_push(a.pc);
     stat_push();
     a.pc = (uint16_t)(0x04 + index * 4);
-    a.idle = false;
+    a.idle = a.polling = false;
     if (a.icntl & 0x10) a.imask &= ~(0x3f >> index);
     else a.imask &= ~0x3f;
     return true;
@@ -783,6 +784,33 @@ void adsp_pulse_irq(int line)
 }
 
 /* ---------------- execution ---------------- */
+
+// "top: Dreg = Ireg; AF|AR = Dreg op AYn; IF cond JUMP top" only rereads an
+// index register, which nothing but the autobuffer (or an interrupt) changes,
+// and every iteration leaves the same state behind. Once it has looped, the
+// DSP may skip ahead to the next transmitted sample.
+static bool is_poll_loop(uint16_t top, uint16_t jump_at)
+{
+    static uint16_t yes[8], no[32];
+    static int nyes, nno;
+    for (int i = 0; i < nyes; i++) if (yes[i] == top) return true;
+    for (int i = 0; i < nno && i < 32; i++) if (no[i] == top) return false;
+
+    static const uint8_t xop_dreg[8] = { 0, 1, 10, 11, 12, 13, 14, 15 };
+    uint32_t mv = pm_read(top), alu = pm_read((uint16_t)(top + 1));
+    int amf = (alu >> 13) & 31, src_grp = (mv >> 8) & 3;
+    bool match = jump_at == top + 2 &&
+        (mv >> 16) == 0x0d && ((mv >> 10) & 3) == 0 &&                 // Dreg = ...
+        (src_grp == 1 || src_grp == 2) && (mv & 15) < 4 &&              // ... I0-I7
+        ((alu >> 16) == 0x22 || (alu >> 16) == 0x23 || (alu >> 16) == 0x26 || (alu >> 16) == 0x27) &&
+        (alu & 15) == 15 && amf >= 0x10 && amf != 0x12 && amf != 0x16 && amf != 0x1a &&  // ALU, no carry in
+        ((alu >> 11) & 3) != 2 &&                                       // Y is not AF
+        xop_dreg[(alu >> 8) & 7] == ((mv >> 4) & 15) &&                 // X is the register just loaded
+        !(a.loop_sp && a.loop_end >= top && a.loop_end <= jump_at);
+    if (match) { if (nyes < 8) yes[nyes++] = top; }
+    else no[nno++ % 32] = top;
+    return match;
+}
 
 static void exec(uint32_t op)
 {
@@ -874,7 +902,11 @@ static void exec(uint32_t op)
         pc_push(a.pc);
         break;
     case 0x18: case 0x19: case 0x1a: case 0x1b: // JUMP
-        if (cond(op & 15)) a.pc = (op >> 4) & 0x3fff;
+        if (cond(op & 15)) {
+            uint16_t at = (uint16_t)(a.pc - 1);
+            a.pc = (op >> 4) & 0x3fff;
+            if (a.pc < at && is_poll_loop(a.pc, at)) a.polling = true;
+        }
         break;
     case 0x1c: case 0x1d: case 0x1e: case 0x1f: // CALL
         if (cond(op & 15)) { pc_push(a.pc); a.pc = (op >> 4) & 0x3fff; }
@@ -950,7 +982,8 @@ void adsp_run(int cycles)
 {
     while (cycles > 0) {
         if (any_irq()) check_irqs();
-        if (a.idle) {
+        if (a.idle || a.polling) {
+            a.polling = false;
             // fast-forward to the next autobuffer sample (or the end of the slice)
             int step = cycles;
             if (a.tx_on) {

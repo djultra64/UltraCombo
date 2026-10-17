@@ -2,6 +2,7 @@
 #include "cpu.h"
 #include "ide.h"
 #include "mem.h"
+#include "rec.h"
 #include "sound.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -227,6 +228,9 @@ int main(int argc, char **argv)
     }
     sound_init(sound_dir);
     cpu_reset();
+    rec_init();
+    // KI2_INTERP_HIST=file: where the interpreter still runs (missing entry points)
+    if (headless && getenv("KI2_INTERP_HIST")) cpu_interp_hist = calloc(1 << 16, sizeof *cpu_interp_hist);
 
     if (headless) {
         FILE *wav = getenv("KI2_WAV") ? fopen(getenv("KI2_WAV"), "wb") : NULL;
@@ -242,7 +246,12 @@ int main(int argc, char **argv)
             acc_ms += ms;
             if (ms > max_ms) max_ms = ms;
             if (f % 60 == 0) {
-                if (getenv("KI2_SPEED")) fprintf(stderr, "frames %d-%d: %.1f ms/frame (%.0f%% speed) worst %.1f ms\n", f - 59, f, acc_ms / 60, 100.0 * (1000.0 / FRAME_HZ) / (acc_ms / 60), max_ms);
+                if (getenv("KI2_SPEED")) {
+                    static uint64_t last_cyc, last_int;
+                    fprintf(stderr, "frames %d-%d: %.1f ms/frame (%.0f%% speed) worst %.1f ms, %.0f%% interpreted, code gen %u\n", f - 59, f, acc_ms / 60, 100.0 * (1000.0 / FRAME_HZ) / (acc_ms / 60), max_ms,
+                            100.0 * (cpu_interp_count - last_int) / (double)(cpu.cycles - last_cyc + 1), rec_code_gen);
+                    last_cyc = cpu.cycles; last_int = cpu_interp_count;
+                }
                 acc_ms = max_ms = 0;
             }
             if (getenv("KI2_DUMP_AT") && f == atoi(getenv("KI2_DUMP_AT"))) {
@@ -261,6 +270,11 @@ int main(int argc, char **argv)
             }
         }
         save_ppm("frame_last.ppm");
+        if (cpu_interp_hist) {
+            FILE *h = fopen(getenv("KI2_INTERP_HIST"), "w");
+            for (int i = 0; i < 1 << 16; i++) if (cpu_interp_hist[i] > 1000) fprintf(h, "%08x %u\n", 0x88000000u + i * 4, cpu_interp_hist[i]);
+            fclose(h);
+        }
         if (wav) {
             uint32_t rate = (uint32_t)sound_rate(), bytes = wav_samples * 2;
             uint8_t h[44] = "RIFF____WAVEfmt ";

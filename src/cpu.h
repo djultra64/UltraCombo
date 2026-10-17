@@ -66,4 +66,6 @@ void cpu_exception(int code, uint32_t badvaddr, bool has_badvaddr);
 
 // Debug hooks
 extern bool cpu_trace;
+extern uint64_t cpu_interp_count;    // instructions run by the interpreter, not recompiled code
+extern uint32_t *cpu_interp_hist;    // optional: per-word counts for 0x88000000-0x8803ffff
 const char *cpu_disasm(uint32_t pc, uint32_t op, char *buf);
