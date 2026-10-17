@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -22,6 +23,16 @@ static bool load_file(const char *path, void *dst, size_t size)
     fclose(f);
     if (n != size) { fprintf(stderr, "%s: short read\n", path); return false; }
     return true;
+}
+
+// Use `name` if it exists, otherwise look in run/ beside the executable.
+static const char *find_data(const char *name, const char *argv0, char *buf, size_t n)
+{
+    if (access(name, R_OK) == 0 || name[0] == '/') return name;
+    const char *slash = strrchr(argv0, '/');
+    int dirlen = slash ? (int)(slash - argv0) : 1;
+    snprintf(buf, n, "%.*s/run/%s", dirlen, slash ? argv0 : ".", name);
+    return access(buf, R_OK) == 0 ? buf : name;
 }
 
 static void run_frame(void)
@@ -111,6 +122,9 @@ int main(int argc, char **argv)
         else { usage(); return 1; }
     }
 
+    static char rom_buf[4096], disk_buf[4096];
+    rom_path = find_data(rom_path, argv[0], rom_buf, sizeof rom_buf);
+    disk_path = find_data(disk_path, argv[0], disk_buf, sizeof disk_buf);
     if (!load_file(rom_path, rom, ROM_SIZE)) return 1;
     if (dis_count) {
         for (int i = 0; i < dis_count; i++) {
