@@ -16,6 +16,8 @@
 #include "training.h"
 #include "icon.h"
 #include "adjust.h"
+#include "rec_build.h"
+#include "rec.h"
 #include "video.h"
 #include "shaders.h"
 #include <SDL2/SDL.h>
@@ -170,7 +172,7 @@ static void present(const char *status)
 static void screenshot(void)
 {
     char dir[4096], path[4200];
-    snprintf(dir, sizeof dir, "%sscreenshots", base_dir());
+    snprintf(dir, sizeof dir, "%sscreenshots", data_dir());
     make_dir(dir);
     time_t t = time(NULL);
     char stamp[32];
@@ -412,7 +414,7 @@ static int slot(void) { return cfg.state_slot >= 1 && cfg.state_slot <= 9 ? cfg.
 static void slot_path(char *buf, size_t n, int s)
 {
     char dir[4096];
-    snprintf(dir, sizeof dir, "%sstates", base_dir());
+    snprintf(dir, sizeof dir, "%sstates", data_dir());
     make_dir(dir);
     snprintf(buf, n, "%s/slot%d.ki2s", dir, s);
 }
@@ -1204,6 +1206,42 @@ static int test_shaders(void)
 }
 
 /* ---------------------------------------------------------------- */
+/* First launch: build the game code for this PC                    */
+/* ---------------------------------------------------------------- */
+
+static void prepare_progress(const char *stage, double fraction)
+{
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) if (ev.type == SDL_CONTROLLERDEVICEADDED) pad_added(ev.cdevice.which);
+    memset(px, 0, sizeof px);
+    osd_clear(ov);
+    osd_box(ov, 30, 70, 260, 100, 0xf0101018u);
+    osd_text(ov, 160 - 21 * 3, 80, "PREPARING THE GAME", 0xffc040);
+    osd_text(ov, 160 - 25 * 3, 96, "FOR THIS PC (FIRST RUN)", 0xb0b0b0);
+    osd_text(ov, 160 - (int)strlen(stage) * 3, 118, stage, 0xffffff);
+    osd_box(ov, 50, 136, 220, 10, 0xff303040u);
+    osd_box(ov, 51, 137, (int)(218 * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)), 8, 0xffc08020u);
+    osd_text(ov, 160 - 24 * 3, 154, "THIS TAKES ABOUT A MINUTE", 0x808080);
+    video_present(px, ov, FILTER_SHARP, cfg.scale_mode);
+}
+
+// Use translated code for full speed: linked in, cached from an earlier run,
+// or built now. Without it the game still runs, on the interpreter.
+static void prepare_game_code(void)
+{
+    if (rec_enabled || getenv("KI2_NOREC")) return;
+    char msg[512];
+    if (rec_build_load_cached(msg, sizeof msg)) { fprintf(stderr, "rec: %s\n", msg); return; }
+    uint64_t t0 = SDL_GetTicks64();
+    bool ok = rec_build(prepare_progress, msg, sizeof msg);
+    fprintf(stderr, "rec: %s (%.0f s)\n", msg, (SDL_GetTicks64() - t0) / 1000.0);
+    osd_message("%s", ok ? "Ready" : "Running without translated code (slower)");
+    if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Killer Instinct 2",
+        "The game code could not be prepared for full speed on this PC, so the game runs on the "
+        "slower interpreter. ki2.log and cache/*/build.log in the game folder say why.", win);
+}
+
+/* ---------------------------------------------------------------- */
 
 int frontend_main(void)
 {
@@ -1246,6 +1284,7 @@ int frontend_main(void)
     int latency = cfg.audio_latency_ms > 10 ? cfg.audio_latency_ms : 10;
 
     if (opt_test_shaders) { int r = test_shaders(); video_close(); SDL_Quit(); return r; }
+    prepare_game_code();
     boot_difficulty = adjust_difficulty();
     apply_shader();
     netplay_set_callbacks(np_run, np_reset);

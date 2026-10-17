@@ -1,8 +1,8 @@
 # Killer Instinct 2 — native port
 
-Runs the arcade game's own code (statically recompiled to C) on Linux, with
-the Midway DCS sound board and IDE hard disk emulated. You need your own
-copies of the game data; none are included.
+Runs the arcade game's own code (statically recompiled to C) on Linux and
+Windows, with the Midway DCS sound board and IDE hard disk emulated. You
+need your own copies of the game data; none are included.
 
 ## Setup
 
@@ -13,26 +13,61 @@ Put these in `run/` (or point `ki2.ini` at them):
   `chdman extractraw -i kinst2.chd -o kinst2.raw`
 - `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36` — sound ROMs
 
-Build (needs gcc, SDL2, python3):
+Then start `ki2` (`ki2.exe` on Windows). On the first launch the program
+shows "PREPARING THE GAME FOR THIS PC": it boots your game files on its
+interpreter until the game has loaded its code, snapshots that code,
+translates it to C and compiles it into a native module. That takes about a
+minute, once; the module is cached in `cache/` (a new one is made if the game
+files change). The compiler used is the first that works of:
 
-    make            # interpreter only
-    make recomp     # boot once, snapshot the game code, recompile it, rebuild
+1. Zig, bundled in `tools/zig` — what the release packages use
+2. a C compiler already installed (`cc`, `gcc` or `clang`)
+3. TinyCC, bundled in `tools/tcc` — builds in seconds, but its code runs at
+   roughly half the speed (still well above full speed on most PCs)
+
+If none works the game runs on the interpreter, with a warning; see
+`build.log` in `cache/src-*/`. All three produce code that behaves identically, so
+netplay works between them.
+
+Settings, the log, screenshots, states and the cache are written next to the
+program if that folder is writable, else into the user data folder
+(`%APPDATA%\KI2Port\ki2\` on Windows, `~/.local/share/KI2Port/ki2/` on
+Linux), whose `run/` folder is also searched for the game files.
+
+### Building
+
+Needs gcc, SDL2 and python3:
+
+    make            # the program; builds the game code at first launch
+    make recomp     # developers: link the game code in instead (a minute)
     ./ki2
 
-`make recomp` takes about a minute and only needs redoing after `make clean`.
-The generated C stays in `build/` because it is derived from your ROM.
+`make recomp` puts the generated C in `build/rec/`, derived from your ROM;
+that binary contains game code and must not be shared.
 
 ### Windows
 
 Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
 official SDL2 MinGW package, unpacked into `deps/sdl2-mingw/`:
 
-    make recomp     # once, on Linux
     make windows    # -> dist/windows/ki2.exe + SDL2.dll
 
-Copy `dist/windows/` to the PC and put the game files in its `run/` folder.
 On Windows the log goes to `ki2.log` beside the executable. Linux and
 Windows builds emulate identically (same state after the same inputs).
+
+### Release packages
+
+    make packages   # -> dist/KI2-Port-Linux.tar.xz, dist/KI2-Port-Windows.zip
+
+These hold the program, Zig and TinyCC, shaders and licences — no game files
+and no game code. They expect, in `deps/`: Zig 0.17 for Linux and Windows
+(`zig-linux/`, `zig-windows/`), TinyCC's `libtcc.so` built with that Zig
+against glibc 2.31 (`tcc-lnx231/`) and `libtcc.dll` (`tcc-win/`). The Linux
+program is built with Zig against glibc 2.31 too, so it runs on distributions
+from about 2020 on; it uses the system's SDL2.
+
+"Killer Instinct" is a trademark of its owners; this project is not
+affiliated with them. Keep that in mind when naming anything you publish.
 
 ## Controls
 

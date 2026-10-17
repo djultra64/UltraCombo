@@ -15,6 +15,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include "icon.h"
+#include "recomp.h"
+#include "rec_build.h"
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -46,13 +48,32 @@ const char *base_dir(void)
     return dir;
 }
 
-// Use `name` if it exists, otherwise look beside the executable and in run/ there.
+// Where settings, the cache, save states and screenshots go: beside the
+// executable when that folder is writable (portable use), otherwise the
+// user's own data folder (installed copies, AppImages).
+const char *data_dir(void)
+{
+    static char *dir;
+    if (dir) return dir;
+    char probe[4200];
+    snprintf(probe, sizeof probe, "%s.ki2-write-test", base_dir());
+    FILE *f = fopen(probe, "wb");
+    if (f) { fclose(f); remove(probe); dir = SDL_strdup(base_dir()); return dir; }
+    dir = SDL_GetPrefPath("KI2Port", "ki2");
+    if (!dir) dir = SDL_strdup(base_dir());
+    return dir;
+}
+
+// Use `name` if it exists, otherwise look beside the executable and in run/
+// there, then in run/ in the data folder.
 const char *find_data(const char *name, char *buf, size_t n)
 {
     if (readable(name)) return name;
     snprintf(buf, n, "%s%s", base_dir(), name);
     if (readable(buf)) return buf;
     snprintf(buf, n, "%srun/%s", base_dir(), name);
+    if (readable(buf)) return buf;
+    snprintf(buf, n, "%srun/%s", data_dir(), name);
     return readable(buf) ? buf : name;
 }
 
@@ -266,7 +287,7 @@ static const char *files_help(void)
              "  ki2-l14.u98  - boot ROM\n"
              "  kinst2.raw  - hard disk, extracted from MAME's kinst2.chd with\n"
              "      chdman extractraw -i kinst2.chd -o kinst2.raw\n"
-             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", base_dir());
+             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", data_dir());
     return buf;
 }
 
@@ -299,12 +320,12 @@ int main(int argc, char **argv)
 #ifdef _WIN32
     {   // a GUI program has no console: keep the log beside the executable
         static char log[4096];
-        snprintf(log, sizeof log, "%ski2.log", base_dir());
+        snprintf(log, sizeof log, "%ski2.log", data_dir());
         if (!getenv("KI2_CONSOLE")) { freopen(log, "w", stderr); setvbuf(stderr, NULL, _IONBF, 0); }
     }
 #endif
     static char ini[4096];
-    snprintf(ini, sizeof ini, "%ski2.ini", base_dir());
+    snprintf(ini, sizeof ini, "%ski2.ini", data_dir());
     config_load(ini);
     const char *rom_path = *cfg.rom ? cfg.rom : "ki2-l14.u98";
     const char *disk_path = *cfg.disk ? cfg.disk : "kinst2.raw";
@@ -330,6 +351,19 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--rewind-test") && i + 1 < argc) rewind_test = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--runahead") && i + 1 < argc) runahead = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--host")) { extern const char *opt_net_host; opt_net_host = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : ""; }
+        else if (!strcmp(argv[i], "--recomp") && i + 3 < argc) {
+            // RAM0 RAM2 OUTDIR: translate a snapshot to C (what `make recomp` uses)
+            static uint8_t r0b[RAM0_SIZE], r2b[RAM2_SIZE];
+            FILE *a = fopen(argv[i + 1], "rb"), *b = fopen(argv[i + 2], "rb");
+            bool ok = a && b && fread(r0b, 1, RAM0_SIZE, a) == RAM0_SIZE && fread(r2b, 1, RAM2_SIZE, b) == RAM2_SIZE;
+            if (a) fclose(a);
+            if (b) fclose(b);
+            char err[512] = "cannot read the snapshot";
+            recomp_info_t info;
+            if (ok) ok = recomp_generate(r0b, r2b, argv[i + 3], &info, err, sizeof err);
+            if (!ok) fprintf(stderr, "recomp: %s\n", err);
+            return ok ? 0 : 1;
+        }
         else if (!strcmp(argv[i], "--write-icon") && i + 1 < argc) return icon_write_ico(argv[++i]) ? 0 : 1;
         else if (!strcmp(argv[i], "--test-shaders")) { extern bool opt_test_shaders; opt_test_shaders = true; }
         else if (!strcmp(argv[i], "--join") && i + 1 < argc) { extern const char *opt_net_join; opt_net_join = argv[++i]; }
@@ -383,6 +417,17 @@ int main(int argc, char **argv)
     hw.dsw = getenv("KI2_DSW") ? (uint32_t)strtoul(getenv("KI2_DSW"), 0, 16) : config_dsw();
     cpu_reset();
     rec_init();
+    if (getenv("KI2_LOAD_MODULE")) {        // testing: a module built by hand
+        char err[512];
+        if (!rec_build_load_file(getenv("KI2_LOAD_MODULE"), err, sizeof err)) fprintf(stderr, "%s\n", err);
+    }
+    if (headless && !rec_enabled && !getenv("KI2_NOREC")) {
+        // no linked-in code: use the code built on this machine, building it if asked (KI2_BUILD=1)
+        char msg[512];
+        if (rec_build_load_cached(msg, sizeof msg) || (getenv("KI2_BUILD") && rec_build(NULL, msg, sizeof msg)))
+            fprintf(stderr, "rec: %s\n", msg);
+        else if (getenv("KI2_BUILD")) fprintf(stderr, "rec: %s\n", msg);
+    }
     // KI2_INTERP_HIST=file: where the interpreter still runs (missing entry points)
     if (headless && getenv("KI2_INTERP_HIST")) cpu_interp_hist = calloc(1 << 16, sizeof *cpu_interp_hist);
 

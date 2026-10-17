@@ -11,3 +11,5 @@ deps/
 build-win/
 dist/
 shaders/extra/
+ki2-dist
+build-lnx/

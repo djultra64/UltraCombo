@@ -4,32 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef struct {
-    uint64_t mask, hi, lo0, lo1;
-} tlb_entry_t;
-
-typedef struct {
-    uint64_t r[32];
-    uint64_t hi, lo;
-    uint32_t pc;          // address of the instruction about to execute
-    uint32_t npc;         // address of the one after it
-    uint32_t cur_pc;      // address of the instruction currently executing
-    bool     in_delay;    // instruction at pc is a branch delay slot
-    bool     next_delay;  // set by a branch: instruction at npc is a delay slot
-
-    uint64_t cp0[32];
-    uint64_t fpr[32];
-    uint32_t fcr31;
-    bool     llbit;
-
-    tlb_entry_t tlb[48];
-
-    uint64_t cycles;      // total instructions executed
-    uint32_t count_base;  // Count value at count_cyc; Count ticks at half the pipeline clock
-    uint64_t count_cyc;
-    uint64_t next_compare; // cycle at which Count reaches Compare
-    uint32_t ext_irq;     // external interrupt lines (bit n = Int n)
-} cpu_t;
+#include "rec_abi.h"     // cpu_t, tlb_entry_t
 
 enum {
     CP0_INDEX = 0, CP0_RANDOM, CP0_ENTRYLO0, CP0_ENTRYLO1, CP0_CONTEXT,
@@ -39,13 +14,6 @@ enum {
     CP0_ECC = 26, CP0_CACHEERR, CP0_TAGLO, CP0_TAGHI, CP0_ERROREPC,
 };
 
-#define SR_IE   0x00000001u
-#define SR_EXL  0x00000002u
-#define SR_ERL  0x00000004u
-#define SR_KSU  0x00000018u
-#define SR_BEV  0x00400000u
-#define SR_FR   0x04000000u
-#define SR_CU1  0x20000000u
 
 enum {
     EXC_INT = 0, EXC_MOD, EXC_TLBL, EXC_TLBS, EXC_ADEL, EXC_ADES, EXC_IBE,

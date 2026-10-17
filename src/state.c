@@ -231,9 +231,12 @@ static uint64_t rom_id(void) { return fnv(0xcbf29ce484222325ull, rom, ROM_SIZE);
 uint64_t state_compat_id(void)
 {
     uint64_t h = rom_id() ^ ((uint64_t)core_len << 32) ^ FILE_VERSION;
-    h = fnv(h, &rec_nfuncs, sizeof rec_nfuncs);
-    h = fnv(h, &rec_nlabels, sizeof rec_nlabels);
-    h = fnv(h, rec_image, rec_image_words * 4);
+    if (rec_enabled && rec_mod) {
+        h = fnv(h, &rec_mod->nfuncs, sizeof rec_mod->nfuncs);
+        h = fnv(h, &rec_mod->nlabels, sizeof rec_mod->nlabels);
+        h = fnv(h, rec_mod->labels, rec_mod->nlabels * sizeof *rec_mod->labels);
+        h = fnv(h, rec_mod->image, rec_mod->image_words * 4);
+    }
     h = fnv(h, &rec_enabled, sizeof rec_enabled);
     return h;
 }
