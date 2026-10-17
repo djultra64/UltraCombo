@@ -5,6 +5,7 @@
 // once per frame (hw.p1, hw.p2, hw.volume), so the emulation stays a pure
 // function of those inputs (needed for netplay later).
 #include "config.h"
+#include "ide.h"
 #include "machine.h"
 #include "mem.h"
 #include "osd.h"
@@ -591,6 +592,8 @@ int frontend_main(void)
     uint64_t freq = SDL_GetPerformanceFrequency();
     uint64_t next = SDL_GetPerformanceCounter();
     while (handle_events()) {
+        static uint32_t last_flush;
+        if (SDL_GetTicks() - last_flush > 5000) { ide_flush(); last_flush = SDL_GetTicks(); }
         bool booting = frame_count < (uint64_t)cfg.boot_skip_frames;
         bool fast = key_held(HK_FAST) || pad_held(cfg.pad_fast) || booting;
         bool rewinding = cfg.rewind && (key_held(HK_REWIND) || pad_held(cfg.pad_rewind));

@@ -181,6 +181,7 @@ void state_rollback(void)
         if (!*df) continue;
         *df = 0;
         memcpy(page_ptr(g), mirror + (size_t)g * PAGE, PAGE);
+        if (g >= RAM_PAGES) ide_tracked_changed();
     }
     core_io(core, true);
 }
@@ -205,6 +206,7 @@ bool state_rewind(void)
         uint8_t *mir = mirror + (size_t)g * PAGE;
         p += unpack_xor(mir, p);                        // mirror now holds the older page
         memcpy(page_ptr((int)g), mir, PAGE);
+        if (g >= RAM_PAGES) ide_tracked_changed();
     }
     free(e);
     for (int g = 0; g < NPAGES; g++) *dirty_flag(g) = 0;
@@ -287,6 +289,7 @@ bool state_load_file(const char *path)
         p += unpack_xor(dst, p);
     }
     rec_forget();
+    ide_tracked_changed();
     memcpy(core, core_in, core_len);
     core_io(core, true);
     free(data);

@@ -38,7 +38,33 @@ recomp: ki2
 build:
 	mkdir -p build
 
-clean:
-	rm -rf build ki2
+# Windows build, cross-compiled with MinGW-w64 against the official SDL2
+# MinGW package (unpacked into deps/sdl2-mingw). Output: dist/windows/.
+WIN_CC   ?= x86_64-w64-mingw32-gcc
+WIN_SDL  ?= $(wildcard deps/sdl2-mingw/SDL2-*/x86_64-w64-mingw32)
+WIN_CFLAGS = -O2 -Wall -Wno-unused-parameter -I$(WIN_SDL)/include -I$(WIN_SDL)/include/SDL2 -Dmain=SDL_main
+WIN_LIBS   = -L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -lws2_32 -mwindows -static-libgcc
+WIN_OBJ     = $(SRC:src/%.c=build-win/%.o)
+WIN_REC_OBJ = $(patsubst build/%.c,build-win/%.o,$(if $(REC_SRC),$(REC_SRC),src/rec_none.c))
 
-.PHONY: clean recomp
+windows: dist/windows/ki2.exe
+
+dist/windows/ki2.exe: $(WIN_OBJ) $(patsubst src/%,build-win/%,$(WIN_REC_OBJ))
+	mkdir -p dist/windows
+	$(WIN_CC) -o $@ $^ $(WIN_LIBS)
+	cp $(WIN_SDL)/bin/SDL2.dll README.md dist/windows/
+	cp $(WIN_SDL)/../README-SDL.txt dist/windows/SDL2-README.txt
+	mkdir -p dist/windows/run
+
+build-win/%.o: src/%.c src/*.h
+	@mkdir -p $(dir $@)
+	$(WIN_CC) $(WIN_CFLAGS) -c -o $@ $<
+
+build-win/rec/%.o: build/rec/%.c src/rec.h src/cpu.h src/mem.h
+	@mkdir -p $(dir $@)
+	$(WIN_CC) $(REC_CFLAGS) -I$(WIN_SDL)/include -c -o $@ $<
+
+clean:
+	rm -rf build build-win dist ki2
+
+.PHONY: clean recomp windows

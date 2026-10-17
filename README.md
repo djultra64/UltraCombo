@@ -22,6 +22,18 @@ Build (needs gcc, SDL2, python3):
 `make recomp` takes about a minute and only needs redoing after `make clean`.
 The generated C stays in `build/` because it is derived from your ROM.
 
+### Windows
+
+Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
+official SDL2 MinGW package, unpacked into `deps/sdl2-mingw/`:
+
+    make recomp     # once, on Linux
+    make windows    # -> dist/windows/ki2.exe + SDL2.dll
+
+Copy `dist/windows/` to the PC and put the game files in its `run/` folder.
+On Windows the log goes to `ki2.log` beside the executable. Linux and
+Windows builds emulate identically (same state after the same inputs).
+
 ## Controls
 
 | Action | Player 1 | Player 2 | Pad (Xbox names) |

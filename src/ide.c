@@ -1,14 +1,20 @@
-// IDE/ATA hard disk backed by a raw image file (memory mapped, writes persist).
+// IDE/ATA hard disk backed by a raw image file. The first sectors (the
+// game's settings and audits) are kept in memory so save states cover them,
+// and written back by ide_flush(); everything else is read through a cache.
 #include "ide.h"
 #include "cpu.h"
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+
+#ifdef _WIN32
+#define fseek64 _fseeki64
+#define ftell64 _ftelli64
+#else
+#define fseek64 fseeko
+#define ftell64 ftello
+#endif
 
 #define ST_ERR  0x01
 #define ST_DRQ  0x08
@@ -16,8 +22,16 @@
 #define ST_DRDY 0x40
 #define ST_BSY  0x80
 
+static FILE *disk;
+static uint8_t tracked[IDE_TRACK_BYTES];   // sectors 0-63, the authoritative copy
+static bool tracked_unsaved;
+
+#define CACHE_BYTES (64 * 1024)
+static uint8_t cache[CACHE_BYTES];
+static uint64_t cache_at = ~0ull;
+
 static struct {
-    uint8_t *img;
+    uint8_t *img;                          // unused, kept for the save state layout
     uint64_t size;
     uint32_t cyls, heads, secs, total;
 
@@ -36,15 +50,54 @@ static struct {
 
 uint8_t ide_dirty[IDE_TRACK_PAGES];
 
-uint8_t *ide_tracked(void) { return d.img; }
+uint8_t *ide_tracked(void) { return tracked; }
+
+static void read_sector(uint32_t lba, void *dst)
+{
+    uint64_t off = (uint64_t)lba * 512;
+    if (off < IDE_TRACK_BYTES) { memcpy(dst, tracked + off, 512); return; }
+    uint64_t blk = off & ~(uint64_t)(CACHE_BYTES - 1);
+    if (blk != cache_at) {
+        memset(cache, 0, CACHE_BYTES);
+        if (fseek64(disk, (long long)blk, SEEK_SET) == 0 && fread(cache, 1, CACHE_BYTES, disk) > 0) {}
+        cache_at = blk;
+    }
+    memcpy(dst, cache + (off - blk), 512);
+}
+
+static void write_sector(uint32_t lba, const void *src)
+{
+    uint64_t off = (uint64_t)lba * 512;
+    if (off < IDE_TRACK_BYTES) {
+        memcpy(tracked + off, src, 512);
+        ide_dirty[off >> 12] = 1;
+        tracked_unsaved = true;
+        return;
+    }
+    static bool warned;
+    if (!warned) fprintf(stderr, "ide: write to sector %u is not covered by save states\n", lba);
+    warned = true;
+    if (off >> 16 == cache_at >> 16) cache_at = ~0ull;
+    if (fseek64(disk, (long long)off, SEEK_SET) == 0) fwrite(src, 1, 512, disk);
+    fflush(disk);
+}
+
+void ide_flush(void)
+{
+    if (!disk || !tracked_unsaved) return;
+    tracked_unsaved = false;
+    if (fseek64(disk, 0, SEEK_SET) == 0) fwrite(tracked, 1, IDE_TRACK_BYTES, disk);
+    fflush(disk);
+}
+
+void ide_tracked_changed(void) { tracked_unsaved = true; }
 
 size_t ide_state(uint8_t *buf, bool load)
 {
     if (buf && load) {
-        uint8_t *img = d.img;
         uint64_t size = d.size;
         memcpy(&d, buf, sizeof d);
-        d.img = img; d.size = size;
+        d.img = NULL; d.size = size;
     } else if (buf) {
         memcpy(buf, &d, sizeof d);
         memset(buf + offsetof(__typeof__(d), img), 0, sizeof d.img);    // keep states pointer-free
@@ -70,14 +123,13 @@ static void ident_str(int word, int nwords, const char *s)
 
 bool ide_open(const char *path, uint32_t cyls, uint32_t heads, uint32_t secs, int serial_offset)
 {
-    int fd = open(path, O_RDWR);
-    if (fd < 0) { perror(path); return false; }
-    struct stat st;
-    fstat(fd, &st);
-    d.size = (uint64_t)st.st_size;
-    d.img = mmap(0, d.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    close(fd);
-    if (d.img == MAP_FAILED) { perror("mmap"); return false; }
+    disk = fopen(path, "r+b");
+    if (!disk) { perror(path); return false; }
+    fseek64(disk, 0, SEEK_END);
+    d.size = (uint64_t)ftell64(disk);
+    fseek64(disk, 0, SEEK_SET);
+    if (fread(tracked, 1, IDE_TRACK_BYTES, disk) != IDE_TRACK_BYTES) { fprintf(stderr, "%s: too small\n", path); return false; }
+    atexit(ide_flush);
 
     d.cyls = cyls; d.heads = heads; d.secs = secs;
     d.total = (uint32_t)(d.size / 512);
@@ -149,7 +201,7 @@ static void fill_read_buf(void)
         schedule_irq();
         return;
     }
-    memcpy(d.buf, d.img + (uint64_t)d.lba * 512, 512);
+    read_sector(d.lba, d.buf);
     d.buf_pos = 0;
     d.status = ST_DRDY | ST_DSC | ST_DRQ;
     schedule_irq();
@@ -228,15 +280,7 @@ static void data_write(uint16_t v)
     if (!d.writing || !(d.status & ST_DRQ)) return;
     d.buf[d.buf_pos++] = v;
     if (d.buf_pos >= 256) {
-        if (d.lba < d.total) {
-            memcpy(d.img + (uint64_t)d.lba * 512, d.buf, 512);
-            if (d.lba * 512 < IDE_TRACK_BYTES) ide_dirty[d.lba * 512 >> 12] = 1;
-            else {
-                static bool warned;
-                if (!warned) fprintf(stderr, "ide: write to sector %u is not covered by save states\n", d.lba);
-                warned = true;
-            }
-        }
+        if (d.lba < d.total) write_sector(d.lba, d.buf);
         d.lba++;
         set_lba_regs(d.lba);
         d.count--;

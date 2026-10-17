@@ -7,3 +7,6 @@ run/
 ki2.ini
 screenshots/
 states/
+deps/
+build-win/
+dist/

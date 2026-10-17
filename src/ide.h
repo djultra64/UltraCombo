@@ -15,7 +15,9 @@ void ide_tick(int cycles);
 #define IDE_TRACK_BYTES (64 * 512)
 #define IDE_TRACK_PAGES (IDE_TRACK_BYTES >> 12)
 extern uint8_t ide_dirty[IDE_TRACK_PAGES];
-uint8_t *ide_tracked(void);              // start of the image (IDE_TRACK_BYTES long)
+uint8_t *ide_tracked(void);              // in-memory copy of the first IDE_TRACK_BYTES
+void ide_tracked_changed(void);          // the copy was modified (state load/rewind)
+void ide_flush(void);                    // write the copy back to the image file
 
 // Save state: copy the controller state to/from buf (NULL: just return the size).
 size_t ide_state(uint8_t *buf, bool load);

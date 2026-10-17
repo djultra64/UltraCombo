@@ -189,6 +189,13 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
+    {   // a GUI program has no console: keep the log beside the executable
+        static char log[4096];
+        snprintf(log, sizeof log, "%ski2.log", base_dir());
+        if (!getenv("KI2_CONSOLE")) { freopen(log, "w", stderr); setvbuf(stderr, NULL, _IONBF, 0); }
+    }
+#endif
     static char ini[4096];
     snprintf(ini, sizeof ini, "%ski2.ini", base_dir());
     config_load(ini);
