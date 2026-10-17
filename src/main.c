@@ -1,6 +1,8 @@
 // Killer Instinct 2 native frontend.
+#include "config.h"
 #include "cpu.h"
 #include "ide.h"
+#include "machine.h"
 #include "mem.h"
 #include "rec.h"
 #include "sound.h"
@@ -8,12 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define CPU_HZ        100000000
 #define LINES         261
 #define VISIBLE_LINES 240
-#define FRAME_HZ      58.9634
 #define CYCLES_PER_LINE ((int)(CPU_HZ / FRAME_HZ / LINES))
 
 static bool load_file(const char *path, void *dst, size_t size)
@@ -26,17 +26,32 @@ static bool load_file(const char *path, void *dst, size_t size)
     return true;
 }
 
-// Use `name` if it exists, otherwise look in run/ beside the executable.
-static const char *find_data(const char *name, const char *argv0, char *buf, size_t n)
+static bool readable(const char *path)
 {
-    if (access(name, R_OK) == 0 || name[0] == '/') return name;
-    const char *slash = strrchr(argv0, '/');
-    int dirlen = slash ? (int)(slash - argv0) : 1;
-    snprintf(buf, n, "%.*s/run/%s", dirlen, slash ? argv0 : ".", name);
-    return access(buf, R_OK) == 0 ? buf : name;
+    FILE *f = fopen(path, "rb");
+    if (f) fclose(f);
+    return f != NULL;
 }
 
-static void run_frame(void)
+const char *base_dir(void)
+{
+    static char *dir;
+    if (!dir) dir = SDL_GetBasePath();
+    if (!dir) dir = SDL_strdup("./");
+    return dir;
+}
+
+// Use `name` if it exists, otherwise look beside the executable and in run/ there.
+const char *find_data(const char *name, char *buf, size_t n)
+{
+    if (readable(name)) return name;
+    snprintf(buf, n, "%s%s", base_dir(), name);
+    if (readable(buf)) return buf;
+    snprintf(buf, n, "%srun/%s", base_dir(), name);
+    return readable(buf) ? buf : name;
+}
+
+void run_frame(void)
 {
     for (int line = 0; line < LINES; line++) {
         if (line == VISIBLE_LINES) cpu_set_irq(0, true);
@@ -61,7 +76,7 @@ static void run_frame(void)
     }
 }
 
-static void to_rgb(uint32_t *dst)
+void to_rgb(uint32_t *dst)
 {
     const uint16_t *src = video_base();
     for (int y = 0; y < 240; y++)
@@ -84,108 +99,6 @@ static void save_ppm(const char *path)
         fwrite(c, 1, 3, f);
     }
     fclose(f);
-}
-
-#define AUDIO_HZ 48000
-
-// Resample DCS output (usually 31.25 kHz) to the device rate and queue it.
-static void pump_audio(SDL_AudioDeviceID dev)
-{
-    static int16_t in[8192], out[16384];
-    static double pos;      // fractional read position into the previous+current block
-    static int16_t prev;
-    int n = sound_fetch(in, 8192);
-    if (!dev) return;
-    double step = sound_rate() / AUDIO_HZ;
-    int m = 0;
-    while (pos < n && m < 16384) {
-        int i = (int)pos;
-        double f = pos - i;
-        int16_t a = i == 0 ? prev : in[i - 1];
-        int16_t b = in[i];
-        out[m++] = (int16_t)(a + (b - a) * f);
-        pos += step;
-    }
-    pos -= n;
-    if (n) prev = in[n - 1];
-    // after a long hitch, throw away the backlog instead of lagging behind
-    if (SDL_GetQueuedAudioSize(dev) > AUDIO_HZ * 2 * 250 / 1000) SDL_ClearQueuedAudio(dev);
-    SDL_QueueAudio(dev, out, (Uint32)m * 2);
-}
-
-typedef struct { SDL_Scancode key; uint32_t *port; uint32_t bit; } keymap_t;
-
-static keymap_t keys[] = {
-    // Player 1: arrows, A S D (high: quick/medium/fierce), Z X C (low)
-    { SDL_SCANCODE_A, &hw.p1, 0x0001 }, { SDL_SCANCODE_S, &hw.p1, 0x0002 }, { SDL_SCANCODE_D, &hw.p1, 0x0004 },
-    { SDL_SCANCODE_Z, &hw.p1, 0x0008 }, { SDL_SCANCODE_X, &hw.p1, 0x0010 }, { SDL_SCANCODE_C, &hw.p1, 0x0020 },
-    { SDL_SCANCODE_UP, &hw.p1, 0x0040 }, { SDL_SCANCODE_DOWN, &hw.p1, 0x0080 },
-    { SDL_SCANCODE_LEFT, &hw.p1, 0x0100 }, { SDL_SCANCODE_RIGHT, &hw.p1, 0x0200 },
-    { SDL_SCANCODE_1, &hw.p1, 0x0400 }, { SDL_SCANCODE_5, &hw.p1, 0x0800 },
-    { SDL_SCANCODE_F2, &hw.p1, 0x1000 },
-    // Player 2: I J K L, T Y U (high), G H B (low)
-    { SDL_SCANCODE_T, &hw.p2, 0x0001 }, { SDL_SCANCODE_Y, &hw.p2, 0x0002 }, { SDL_SCANCODE_U, &hw.p2, 0x0004 },
-    { SDL_SCANCODE_G, &hw.p2, 0x0008 }, { SDL_SCANCODE_H, &hw.p2, 0x0010 }, { SDL_SCANCODE_B, &hw.p2, 0x0020 },
-    { SDL_SCANCODE_I, &hw.p2, 0x0040 }, { SDL_SCANCODE_K, &hw.p2, 0x0080 },
-    { SDL_SCANCODE_J, &hw.p2, 0x0100 }, { SDL_SCANCODE_L, &hw.p2, 0x0200 },
-    { SDL_SCANCODE_2, &hw.p2, 0x0400 }, { SDL_SCANCODE_6, &hw.p2, 0x0800 },
-    { SDL_SCANCODE_9, &hw.p2, 0x2000 },
-};
-
-// Game controllers: the first one connected is player 1, the second player 2.
-// Face buttons follow the cabinet: top row punches, bottom row kicks.
-//   X / Y / RB  = high quick / medium / fierce
-//   A / B / RT  = low quick / medium / fierce
-//   D-pad or left stick = move, Start = start, Back = coin
-#define MAX_PADS 2
-static SDL_GameController *pads[MAX_PADS];
-
-static const struct { SDL_GameControllerButton b; uint32_t bit; } pad_buttons[] = {
-    { SDL_CONTROLLER_BUTTON_X, 0x0001 }, { SDL_CONTROLLER_BUTTON_Y, 0x0002 },
-    { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x0004 },
-    { SDL_CONTROLLER_BUTTON_A, 0x0008 }, { SDL_CONTROLLER_BUTTON_B, 0x0010 },
-    { SDL_CONTROLLER_BUTTON_DPAD_UP, 0x0040 }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0x0080 },
-    { SDL_CONTROLLER_BUTTON_DPAD_LEFT, 0x0100 }, { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 0x0200 },
-    { SDL_CONTROLLER_BUTTON_START, 0x0400 }, { SDL_CONTROLLER_BUTTON_BACK, 0x0800 },
-};
-
-static void pad_added(int index)
-{
-    for (int i = 0; i < MAX_PADS; i++) {
-        if (pads[i]) continue;
-        pads[i] = SDL_GameControllerOpen(index);
-        if (pads[i]) fprintf(stderr, "pad: player %d = %s\n", i + 1, SDL_GameControllerName(pads[i]));
-        return;
-    }
-}
-
-static void pad_removed(SDL_JoystickID id)
-{
-    for (int i = 0; i < MAX_PADS; i++)
-        if (pads[i] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pads[i])) == id) {
-            fprintf(stderr, "pad: player %d disconnected\n", i + 1);
-            SDL_GameControllerClose(pads[i]);
-            pads[i] = NULL;
-        }
-}
-
-static void read_pads(void)
-{
-    const int dead = 16000, trigger = 12000;
-    for (int i = 0; i < MAX_PADS; i++) {
-        SDL_GameController *c = pads[i];
-        if (!c) continue;
-        uint32_t *port = i ? &hw.p2 : &hw.p1;
-        for (size_t k = 0; k < sizeof pad_buttons / sizeof pad_buttons[0]; k++)
-            if (SDL_GameControllerGetButton(c, pad_buttons[k].b)) *port &= ~pad_buttons[k].bit;
-        if (SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > trigger) *port &= ~0x0020u;
-        int x = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
-        int y = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY);
-        if (y < -dead) *port &= ~0x0040u;
-        if (y > dead) *port &= ~0x0080u;
-        if (x < -dead) *port &= ~0x0100u;
-        if (x > dead) *port &= ~0x0200u;
-    }
 }
 
 // Scripted input for headless runs: "frame:button:duration,..."
@@ -234,12 +147,19 @@ static void usage(void)
         "  --headless N    run N frames without a window\n"
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
         "  --script S      headless input, e.g. \"3600:coin1:6,3700:start1:6\"\n"
-        "  --trace         log every executed instruction\n");
+        "  --trace         log every executed instruction\n"
+        "Settings, key bindings and hotkeys are in ki2.ini beside the executable\n"
+        "(written with defaults on first run). See README.md.\n");
 }
 
 int main(int argc, char **argv)
 {
-    const char *rom_path = "ki2-l14.u98", *disk_path = "kinst2.raw", *sound_dir = ".";
+    static char ini[4096];
+    snprintf(ini, sizeof ini, "%ski2.ini", base_dir());
+    config_load(ini);
+    const char *rom_path = *cfg.rom ? cfg.rom : "ki2-l14.u98";
+    const char *disk_path = *cfg.disk ? cfg.disk : "kinst2.raw";
+    const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     uint32_t dis_addr = 0;
     for (int i = 1; i < argc; i++) {
@@ -256,8 +176,8 @@ int main(int argc, char **argv)
     }
 
     static char rom_buf[4096], disk_buf[4096];
-    rom_path = find_data(rom_path, argv[0], rom_buf, sizeof rom_buf);
-    disk_path = find_data(disk_path, argv[0], disk_buf, sizeof disk_buf);
+    rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
+    disk_path = find_data(disk_path, disk_buf, sizeof disk_buf);
     if (!load_file(rom_path, rom, ROM_SIZE)) return 1;
     if (dis_count) {
         for (int i = 0; i < dis_count; i++) {
@@ -278,9 +198,10 @@ int main(int argc, char **argv)
     static char snd_buf[4096];
     if (!strcmp(sound_dir, ".")) {
         // locate the sound ROMs the same way as the boot ROM
-        const char *u10 = find_data("ki2_l1.u10", argv[0], snd_buf, sizeof snd_buf);
+        const char *u10 = find_data("ki2_l1.u10", snd_buf, sizeof snd_buf);
         const char *slash = strrchr(u10, '/');
-        if (slash) { snd_buf[slash - u10] = 0; if (u10 != snd_buf) { memmove(snd_buf, u10, slash - u10); snd_buf[slash - u10] = 0; } sound_dir = snd_buf; }
+        if (!slash) slash = strrchr(u10, '\\');
+        if (slash) { memmove(snd_buf, u10, (size_t)(slash - u10)); snd_buf[slash - u10] = 0; sound_dir = snd_buf; }
     }
     sound_init(sound_dir);
     cpu_reset();
@@ -347,59 +268,5 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
-    {   // extra controller mappings (https://github.com/mdqinc/SDL_GameControllerDB), if present
-        static char db_buf[4096];
-        const char *db = find_data("gamecontrollerdb.txt", argv[0], db_buf, sizeof db_buf);
-        if (access(db, R_OK) == 0) SDL_GameControllerAddMappingsFromFile(db);
-    }
-    SDL_Window *win = SDL_CreateWindow("Killer Instinct 2", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                       960, 720, SDL_WINDOW_RESIZABLE);
-    SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
-    SDL_RenderSetLogicalSize(ren, 320, 240);
-    SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 240);
-    SDL_AudioSpec want = { .freq = AUDIO_HZ, .format = AUDIO_S16SYS, .channels = 1, .samples = 1024 }, have;
-    SDL_AudioDeviceID adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (!adev) fprintf(stderr, "audio: %s\n", SDL_GetError());
-    else SDL_PauseAudioDevice(adev, 0);
-
-    static uint32_t px[320 * 240];
-    uint64_t freq = SDL_GetPerformanceFrequency();
-    uint64_t next = SDL_GetPerformanceCounter();
-    bool running = true;
-    while (running) {
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_QUIT) running = false;
-            if (ev.type == SDL_CONTROLLERDEVICEADDED) pad_added(ev.cdevice.which);
-            if (ev.type == SDL_CONTROLLERDEVICEREMOVED) pad_removed(ev.cdevice.which);
-            if (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
-        }
-        const uint8_t *ks = SDL_GetKeyboardState(NULL);
-        hw.p1 = hw.p2 = 0xffffffffu;
-        for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
-            if (ks[keys[i].key]) *keys[i].port &= ~keys[i].bit;
-        read_pads();
-
-        run_frame();
-        pump_audio(adev);
-        to_rgb(px);
-        SDL_UpdateTexture(tex, NULL, px, 320 * 4);
-        SDL_RenderClear(ren);
-        SDL_RenderCopy(ren, tex, NULL, NULL);
-        SDL_RenderPresent(ren);
-
-        if (adev) {
-            // the audio device is the clock: keep ~70 ms queued, run ahead otherwise
-            while (SDL_GetQueuedAudioSize(adev) > AUDIO_HZ * 2 * 70 / 1000) SDL_Delay(1);
-            next = SDL_GetPerformanceCounter();
-        } else {
-            next += (uint64_t)(freq / FRAME_HZ);
-            uint64_t now = SDL_GetPerformanceCounter();
-            if (now < next) SDL_Delay((uint32_t)((next - now) * 1000 / freq));
-            else next = now;
-        }
-    }
-    SDL_Quit();
-    return 0;
+    return frontend_main();
 }
