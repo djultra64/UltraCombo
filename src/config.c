@@ -21,6 +21,7 @@ typedef struct {
 
 static const char *const scale_names[] = { "fit", "integer", "stretch", 0 };
 static const char *const pacing_names[] = { "auto", "audio", "vsync", 0 };
+static const char *const filter_names[] = { "sharp", "smooth", "scanlines", "crt", 0 };
 
 static const char *const button_names[NBUTTONS] = {
     "high_quick", "high_medium", "high_fierce", "low_quick", "low_medium", "low_fierce",
@@ -34,11 +35,11 @@ static const char *const pad_defaults[NBUTTONS] = {
 static const char *const hotkey_names[NHOTKEYS] = {
     "menu", "pause", "frame_advance", "fast_forward", "rewind", "save_state", "load_state", "next_slot",
     "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test", "service",
-    "game_volume_up", "game_volume_down",
+    "game_volume_up", "game_volume_down", "input_display", "training", "dummy_record", "dummy_play",
 };
 static const char *const hotkey_defaults[NHOTKEYS] = {
     "F1", "P", ".", "Tab", "Backspace", "F5", "F7", "F6",
-    "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown",
+    "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown", "F3", "F4", "F8", "F9",
 };
 
 #define MAX_OPTS 96
@@ -61,7 +62,8 @@ static void build_table(void)
     add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "no", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
     add("video", "window_scale", T_INT, &cfg.window_scale, "3", "initial window size as a multiple of 320x240", 0);
     add("video", "scale", T_ENUM, &cfg.scale_mode, "fit", "fit (largest 4:3), integer (sharpest, may border), stretch", scale_names);
-    add("video", "smooth", T_BOOL, &cfg.smooth, "no", "bilinear filtering instead of sharp pixels", 0);
+    add("video", "filter", T_ENUM, &cfg.filter, "sharp",
+        "sharp (crisp pixels), smooth (sharpened bicubic), scanlines, crt (scanlines, mask, curvature)", filter_names);
     add("video", "pacing", T_ENUM, &cfg.pacing, "auto",
         "audio: original 58.96 Hz timed by the sound card; vsync: one frame per display refresh"
         " (smooth on 60 Hz, game runs 1.7% fast); auto: vsync on ~60 Hz displays, else audio", pacing_names);
@@ -77,6 +79,9 @@ static void build_table(void)
         "0-2: hide the game's built-in input lag (1 frame) by emulating ahead; 1 is enough, 2 needs a fast CPU", 0);
     add("system", "rewind", T_BOOL, &cfg.rewind, "yes", "keep a rewind history (hold the rewind hotkey)", 0);
     add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "256", "memory for it; about 85 KB per frame (256 MB = ~50 s)", 0);
+    add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
+    add("system", "training", T_BOOL, &cfg.training, "no",
+        "training mode: health refills after each combo, the clock stops (start a 2-player game for a dummy)", 0);
     add("system", "state_slot", T_INT, &cfg.state_slot, "1", "save state slot used by the hotkeys, 1-9", 0);
 
     for (int p = 0; p < 2; p++)
@@ -91,7 +96,8 @@ static void build_table(void)
         snprintf(hk_keys[h], 24, "%s", hotkey_defaults[h]);
         add("hotkeys", hotkey_names[h], T_KEY, &cfg.hotkeys[h], hk_keys[h],
             h == HK_MENU ? "settings menu (Esc also opens it)" : h == HK_FAST ? "hold to fast-forward" :
-            h == HK_REWIND ? "hold to rewind" : h == HK_STEP ? "while paused, advance one frame" : 0, 0);
+            h == HK_REWIND ? "hold to rewind" : h == HK_STEP ? "while paused, advance one frame" :
+            h == HK_DUMMY_RECORD ? "training: record player 2's actions with your controls" : 0, 0);
     }
     for (int b = 0; b < NBUTTONS; b++) {
         snprintf(pad_keys[b], 24, "%s", pad_defaults[b]);
@@ -230,7 +236,8 @@ void config_load(const char *path)
                     set(&opts[i], opts[i].def);
                 }
             }
-        if (!found) fprintf(stderr, "%s:%d: unknown setting [%s] %s\n", path, n, sec, k);
+        if (!found && !(!SDL_strcasecmp(sec, "video") && !SDL_strcasecmp(k, "smooth")))   // replaced by filter
+            fprintf(stderr, "%s:%d: unknown setting [%s] %s\n", path, n, sec, k);
     }
     fclose(f);
 }

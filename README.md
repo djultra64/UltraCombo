@@ -46,13 +46,47 @@ The first pad connected is player 1, the second player 2.
 | . | Frame advance (pauses first) |
 | F11 or Alt+Enter | Fullscreen |
 | F12 | Screenshot to `screenshots/` |
+| F3 | Input display |
+| F4 | Training mode |
+| F8 / F9 | Record / play the training dummy |
 | = / - / M | Volume up / down / mute |
 | F2 | Operator test menu |
 | 9 | Service credit |
 | Page Up / Page Down | The cabinet's own volume buttons |
 
-The menu has save/load, run-ahead, rewind, video, volume and auto-coin
-settings, Reset and Quit; changes are saved to `ki2.ini` when it closes.
+The menu has save/load, run-ahead, rewind, training, input display, video,
+volume and auto-coin settings, Reset and Quit; changes are saved to
+`ki2.ini` when it closes.
+
+## Video filters
+
+`filter` in `ki2.ini` (or Filter in the menu), drawn by the GPU:
+
+- **sharp** — crisp pixels, evenly sized at any window size
+- **smooth** — sharpened bicubic; suits KI2's pre-rendered 3D art
+- **scanlines** — a CRT's horizontal lines without the rest
+- **crt** — scanlines, aperture-grille mask, slight curvature and vignette
+  (the mask needs at least 960 pixels of width)
+
+Without OpenGL the game falls back to plain SDL drawing (sharp or smooth).
+
+## Training mode
+
+Turn it on with F4 or in the menu. Health refills a moment after each
+combo ends (so you can still read the damage) and the round clock stops.
+
+For a sparring partner, start a two-player game (press 2 to join; auto-coin
+pays), then:
+
+1. **F8** — record: your controls now drive player 2 (up to 10 seconds).
+2. **F8** — stop recording.
+3. **F9** — the dummy repeats the recording on a loop; F9 again stops it.
+
+Directions are recorded as pressed (left/right on screen), so record from
+the side the dummy will be on.
+
+F3 shows both players' recent inputs in numpad notation (6 = forward when
+facing right, 2 = down, 5 = neutral) with the number of frames each was held.
 
 ## Save states, rewind and run-ahead
 

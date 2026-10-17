@@ -1,4 +1,5 @@
-// On-screen messages drawn into the 320x240 output image.
+// On-screen messages and menus, drawn into a 320x240 0xAARRGGBB overlay that
+// the video output puts on top of the (filtered) game image.
 #include "osd.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -37,8 +38,22 @@ void osd_message(const char *fmt, ...)
     msg_until = SDL_GetTicks() + 2000;
 }
 
+static void draw_text(uint32_t *px, int x, int y, const char *s, uint32_t color);
+
+void osd_clear(uint32_t *ov) { memset(ov, 0, 320 * 240 * 4); }
+
+static void fill(uint32_t *ov, int x0, int y0, int w, int h, uint32_t argb)
+{
+    for (int y = y0 < 0 ? 0 : y0; y < y0 + h && y < 240; y++)
+        for (int x = x0 < 0 ? 0 : x0; x < x0 + w && x < 320; x++) ov[y * 320 + x] = argb;
+}
+
+void osd_text(uint32_t *ov, int x, int y, const char *s, uint32_t rgb) { draw_text(ov, x, y, s, rgb); }
+void osd_box(uint32_t *ov, int x, int y, int w, int h, uint32_t argb) { fill(ov, x, y, w, h, argb); }
+
 static void draw_text(uint32_t *px, int x, int y, const char *s, uint32_t color)
 {
+    color |= 0xff000000u;
     for (; *s; s++, x += 6) {
         int c = (unsigned char)*s;
         if (c >= 'a' && c <= 'z') c -= 32;
@@ -52,13 +67,10 @@ static void draw_text(uint32_t *px, int x, int y, const char *s, uint32_t color)
     }
 }
 
-// A dimmed box with the text in it, so it reads over any background.
+// A dark translucent box with the text in it, so it reads over any background.
 static void draw_label(uint32_t *px, int x, int y, const char *s)
 {
-    int w = (int)strlen(s) * 6 + 5, h = 11;
-    for (int yy = y; yy < y + h && yy < 240; yy++)
-        for (int xx = x; xx < x + w && xx < 320; xx++)
-            if (xx >= 0 && yy >= 0) px[yy * 320 + xx] = (px[yy * 320 + xx] >> 2) & 0x3f3f3f;
+    fill(px, x, y, (int)strlen(s) * 6 + 5, 11, 0xc0000000u);
     draw_text(px, x + 3, y + 2, s, 0xffffff);
 }
 
@@ -75,11 +87,9 @@ void osd_menu(uint32_t *px, const char *title, const char *const *items, int n, 
 {
     int w = 220, row = 10, h = 22 + n * row + (footer ? 14 : 0);
     int x0 = (320 - w) / 2, y0 = (240 - h) / 2;
-    for (int y = 0; y < 240; y++)                    // dim the game
-        for (int x = 0; x < 320; x++) px[y * 320 + x] = (px[y * 320 + x] >> 1) & 0x7f7f7f;
-    for (int y = y0; y < y0 + h; y++)
-        for (int x = x0; x < x0 + w; x++)
-            px[y * 320 + x] = (y == y0 || y == y0 + h - 1 || x == x0 || x == x0 + w - 1) ? 0xc08020 : 0x101018;
+    fill(px, 0, 0, 320, 240, 0x90000000u);           // dim the game
+    fill(px, x0, y0, w, h, 0xffc08020u);
+    fill(px, x0 + 1, y0 + 1, w - 2, h - 2, 0xf0101018u);
     draw_text(px, x0 + (w - (int)strlen(title) * 6) / 2, y0 + 5, title, 0xffc040);
     for (int i = 0; i < n; i++) {
         int y = y0 + 18 + i * row;
@@ -87,9 +97,7 @@ void osd_menu(uint32_t *px, const char *title, const char *const *items, int n, 
         const char *tab = strchr(items[i], '\t');
         size_t len = tab ? (size_t)(tab - items[i]) : strlen(items[i]);
         snprintf(label, sizeof label, "%.*s", (int)len, items[i]);
-        if (i == sel)
-            for (int yy = y - 1; yy < y + 8; yy++)
-                for (int x = x0 + 2; x < x0 + w - 2; x++) px[yy * 320 + x] = 0x604010;
+        if (i == sel) fill(px, x0 + 2, y - 1, w - 4, 9, 0xff604010u);
         uint32_t c = i == sel ? 0xffffff : 0xb0b0b0;
         draw_text(px, x0 + 8, y, label, c);
         if (tab) {

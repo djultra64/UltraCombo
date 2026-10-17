@@ -11,6 +11,8 @@
 #include "png.h"
 #include "sound.h"
 #include "state.h"
+#include "training.h"
+#include "video.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,10 +28,9 @@
 #define AUDIO_HZ 48000
 
 static SDL_Window *win;
-static SDL_Renderer *ren;
-static SDL_Texture *tex;
 static SDL_AudioDeviceID adev;
-static uint32_t px[320 * 240];
+static uint32_t px[320 * 240];     // game image
+static uint32_t ov[320 * 240];     // overlay: messages, menu, input display
 
 static bool paused, step_once, fullscreen, muted, vsync;
 static int  volume;
@@ -77,14 +78,6 @@ static double queued_ms(void)
 /* Video                                                            */
 /* ---------------------------------------------------------------- */
 
-static void apply_scaling(void)
-{
-    if (cfg.scale_mode == SCALE_STRETCH) SDL_RenderSetLogicalSize(ren, 0, 0);
-    else SDL_RenderSetLogicalSize(ren, 320, 240);
-    SDL_RenderSetIntegerScale(ren, cfg.scale_mode == SCALE_INTEGER);
-    SDL_SetTextureScaleMode(tex, cfg.smooth ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
-}
-
 // Display-locked pacing is used when the display runs close to 60 Hz.
 static void choose_pacing(void)
 {
@@ -95,7 +88,7 @@ static void choose_pacing(void)
                 (cfg.pacing == PACING_AUTO && display_hz >= 59 && display_hz <= 61);
     if (want != vsync || !frame_count) {
         vsync = want;
-        SDL_RenderSetVSync(ren, vsync);
+        video_set_vsync(vsync);
         fprintf(stderr, "video: %.0f Hz display, %s pacing\n", display_hz, vsync ? "vsync" : "audio");
     }
 }
@@ -107,18 +100,18 @@ static void set_fullscreen(bool on)
     SDL_ShowCursor(on ? SDL_DISABLE : SDL_ENABLE);
 }
 
-static void draw_menu(uint32_t *px);
+static void draw_menu(uint32_t *ov);
+static void draw_inputs(uint32_t *ov);
 
 static void present(const char *status)
 {
+    if (!status) status = training_status();
     to_rgb(px);
-    osd_draw(px, status);
-    draw_menu(px);
-    SDL_UpdateTexture(tex, NULL, px, 320 * 4);
-    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
-    SDL_RenderClear(ren);
-    SDL_RenderCopy(ren, tex, NULL, NULL);
-    SDL_RenderPresent(ren);
+    osd_clear(ov);
+    draw_inputs(ov);
+    osd_draw(ov, status);
+    draw_menu(ov);
+    video_present(px, ov, cfg.filter, cfg.scale_mode);
 }
 
 static void screenshot(void)
@@ -247,6 +240,55 @@ static void auto_coin(uint32_t held[2])
     } else ac.active = false;
 }
 
+/* ---------------------------------------------------------------- */
+/* Input display                                                    */
+/* ---------------------------------------------------------------- */
+
+#define HIST 12
+static struct { uint32_t held; int frames; } inhist[2][HIST];   // [0] is the newest
+
+static void record_inputs(const uint32_t held[2])
+{
+    const uint32_t mask = (1u << BTN_START) - 1;               // directions and attacks
+    for (int p = 0; p < 2; p++) {
+        uint32_t h = held[p] & mask;
+        if (inhist[p][0].frames && inhist[p][0].held == h) {
+            if (inhist[p][0].frames < 99) inhist[p][0].frames++;
+            continue;
+        }
+        memmove(&inhist[p][1], &inhist[p][0], (HIST - 1) * sizeof inhist[p][0]);
+        inhist[p][0].held = h;
+        inhist[p][0].frames = 1;
+    }
+}
+
+static void describe(uint32_t h, char *buf, size_t n)
+{
+    int up = h >> BTN_UP & 1, down = h >> BTN_DOWN & 1, left = h >> BTN_LEFT & 1, right = h >> BTN_RIGHT & 1;
+    int row = up ? 2 : down ? 0 : 1, col = left ? 0 : right ? 2 : 1;
+    static const char *const names[6] = { "QP", "MP", "FP", "QK", "MK", "FK" };
+    int len = snprintf(buf, n, "%d", row * 3 + col + 1);
+    for (int b = 0; b < 6; b++)
+        if (h >> b & 1) len += snprintf(buf + len, n - (size_t)len, " %s", names[b]);
+}
+
+static void draw_inputs(uint32_t *out)
+{
+    if (!cfg.input_display) return;
+    for (int p = 0; p < 2; p++) {
+        int y = 44;
+        osd_box(out, p ? 320 - 62 : 0, y - 2, 62, HIST * 9 + 3, 0x90000000u);
+        for (int i = 0; i < HIST && inhist[p][i].frames; i++, y += 9) {
+            char a[32], line[48];
+            describe(inhist[p][i].held, a, sizeof a);
+            snprintf(line, sizeof line, "%2d %s", inhist[p][i].frames, a);
+            uint32_t c = i == 0 ? 0xffffff : 0xa0a0a0;
+            int x = p ? 320 - 4 - (int)strlen(line) * 6 : 3;
+            osd_text(out, x, y, line, c);
+        }
+    }
+}
+
 static void set_ports(const uint32_t held[2])
 {
     const uint8_t *ks = SDL_GetKeyboardState(NULL);
@@ -328,7 +370,7 @@ static void apply_rewind_setting(void)
 /* Menu                                                             */
 /* ---------------------------------------------------------------- */
 
-enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_RUNAHEAD, M_REWIND, M_FULLSCREEN, M_SCALE, M_SMOOTH,
+enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_RUNAHEAD, M_REWIND, M_TRAINING, M_INPUTS, M_FULLSCREEN, M_SCALE, M_FILTER,
        M_PACING, M_VOLUME, M_AUTOCOIN, M_RESET, M_QUIT, M_COUNT };
 
 static bool menu_open, menu_changed, quit_requested;
@@ -349,9 +391,12 @@ static void draw_menu(uint32_t *out)
     snprintf(b[M_SLOT], 64, "State slot\t< %d >", slot());
     snprintf(b[M_RUNAHEAD], 64, "Run-ahead (less lag)\t%s", ra_names[ra]);
     snprintf(b[M_REWIND], 64, "Rewind\t%s", cfg.rewind ? "On" : "Off");
+    snprintf(b[M_TRAINING], 64, "Training mode\t%s", cfg.training ? "On" : "Off");
+    snprintf(b[M_INPUTS], 64, "Input display\t%s", cfg.input_display ? "On" : "Off");
     snprintf(b[M_FULLSCREEN], 64, "Fullscreen\t%s", fullscreen ? "On" : "Off");
     snprintf(b[M_SCALE], 64, "Scaling\t%s", scale_names[cfg.scale_mode]);
-    snprintf(b[M_SMOOTH], 64, "Smoothing\t%s", cfg.smooth ? "On" : "Off");
+    static const char *const filter_names[] = { "Sharp", "Smooth", "Scanlines", "CRT" };
+    snprintf(b[M_FILTER], 64, "Filter\t%s", filter_names[cfg.filter]);
     snprintf(b[M_PACING], 64, "Frame pacing\t%s%s", pacing_names[cfg.pacing],
              cfg.pacing == PACING_AUTO ? (vsync ? " (vsync)" : " (audio)") : "");
     snprintf(b[M_VOLUME], 64, "Volume\t%s", muted ? "Muted" : "");
@@ -387,9 +432,11 @@ static void menu_change(int dir)
     case M_SLOT: { int s = slot() - 1; cycle(&s, 9, d); cfg.state_slot = s + 1; break; }
     case M_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
     case M_REWIND: cfg.rewind = !cfg.rewind; apply_rewind_setting(); break;
+    case M_TRAINING: cfg.training = !cfg.training; break;
+    case M_INPUTS: cfg.input_display = !cfg.input_display; break;
     case M_FULLSCREEN: set_fullscreen(!fullscreen); break;
-    case M_SCALE: cycle(&cfg.scale_mode, 3, d); apply_scaling(); break;
-    case M_SMOOTH: cfg.smooth = !cfg.smooth; apply_scaling(); break;
+    case M_SCALE: cycle(&cfg.scale_mode, 3, d); break;
+    case M_FILTER: cycle(&cfg.filter, NFILTERS, d); break;
     case M_PACING: cycle(&cfg.pacing, 3, d); choose_pacing(); break;
     case M_VOLUME:
         if (!dir) muted = !muted;
@@ -472,6 +519,10 @@ static bool handle_events(void)
             else if (is_hotkey(sc, HK_LOAD_STATE)) load_state();
             else if (is_hotkey(sc, HK_NEXT_SLOT)) { cfg.state_slot = slot() % 9 + 1; osd_message("State slot %d", slot()); }
             else if (is_hotkey(sc, HK_SCREENSHOT)) screenshot();
+            else if (is_hotkey(sc, HK_TRAINING)) { cfg.training = !cfg.training; osd_message("Training mode %s", cfg.training ? "on" : "off"); }
+            else if (is_hotkey(sc, HK_DUMMY_RECORD)) training_record_toggle();
+            else if (is_hotkey(sc, HK_DUMMY_PLAY)) training_play_toggle();
+            else if (is_hotkey(sc, HK_INPUT_DISPLAY)) { cfg.input_display = !cfg.input_display; osd_message("Input display %s", cfg.input_display ? "on" : "off"); }
             else if (is_hotkey(sc, HK_VOL_UP)) set_volume(volume + 10);
             else if (is_hotkey(sc, HK_VOL_DOWN)) set_volume(volume - 10);
             else if (is_hotkey(sc, HK_MUTE)) { muted = !muted; osd_message(muted ? "Muted" : "Volume %d%%", volume); }
@@ -488,8 +539,11 @@ static void emulate_frame(void)
 {
     uint32_t held[2];
     read_players(held);
+    training_inputs(held);
     auto_coin(held);
+    record_inputs(held);
     set_ports(held);
+    training_apply(true);
     run_frame();
     state_checkpoint();
     frame_count++;
@@ -500,7 +554,7 @@ static void emulate_frame(void)
 static void present_ahead(int n)
 {
     if (n <= 0) { present(NULL); return; }
-    for (int k = 0; k < n; k++) { run_frame(); pump_audio(true, 1); }
+    for (int k = 0; k < n; k++) { training_apply(false); run_frame(); pump_audio(true, 1); }
     present(NULL);
     state_rollback();
 }
@@ -520,12 +574,9 @@ int frontend_main(void)
         if (f) { fclose(f); SDL_GameControllerAddMappingsFromFile(db); }
     }
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
-    win = SDL_CreateWindow("Killer Instinct 2", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                           320 * scale, 240 * scale, SDL_WINDOW_RESIZABLE);
-    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
-    if (!win || !ren) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
-    tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 240);
-    apply_scaling();
+    win = video_open("Killer Instinct 2", 320 * scale, 240 * scale);
+    if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    fprintf(stderr, "video: %s\n", video_backend());
     if (cfg.fullscreen) set_fullscreen(true);
     choose_pacing();
     apply_rewind_setting();
@@ -617,6 +668,7 @@ int frontend_main(void)
         }
     }
     if (menu_changed) menu_close();
+    video_close();
     SDL_Quit();
     return 0;
 }
