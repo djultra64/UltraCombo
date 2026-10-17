@@ -11,33 +11,6 @@ cpu_t cpu;
 bool cpu_trace;
 bool cpu_idle;
 
-// Recognise "1: mfc0 rX,Cause; nop; andi rX,rX,IPmask; beq/bne rX,zero,1b; nop"
-// i.e. polling an external interrupt line without doing anything else.
-static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
-{
-    static uint32_t yes[16], no[64];
-    static int nyes, nno;
-    for (int i = 0; i < nyes; i++) if (yes[i] == pc) return true;
-    for (int i = 0; i < nno; i++) if (no[i] == pc) return false;
-
-    bool match = false;
-    uint8_t *p = mem_ptr(pc & 0x1fffffffu);
-    if (p && (pc & 0xe0000000u) == 0x80000000u) {
-        uint32_t w[5];
-        memcpy(w, p, sizeof w);
-        int rt = (op >> 16) & 31;
-        match = w[1] == 0 &&
-                (w[2] >> 26) == 0x0c && ((w[2] >> 21) & 31) == rt && ((w[2] >> 16) & 31) == rt &&
-                (w[2] & 0xffff) && !(w[2] & 0x80ff) &&                       // IP2..IP6 only
-                ((w[3] >> 26) == 0x04 || (w[3] >> 26) == 0x05) &&
-                ((w[3] >> 21) & 31) == rt && ((w[3] >> 16) & 31) == 0 &&
-                (int16_t)w[3] == -4 && w[4] == 0;
-    }
-    if (match) { if (nyes < 16) yes[nyes++] = pc; }
-    else { no[nno % 64] = pc; nno++; }
-    return match;
-}
-
 #define RS ((op >> 21) & 31)
 #define RT ((op >> 16) & 31)
 #define RD ((op >> 11) & 31)
@@ -52,6 +25,48 @@ static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
 // Thrown-exception mechanism: memory helpers set this and the step aborts.
 static bool exc_raised;
 static bool tlb_refill;
+
+
+// Recognise "1: mfc0 rX,Cause; nop; andi rX,rX,IPmask; beq/bne rX,zero,1b; <slot>"
+// i.e. polling an external interrupt line without doing anything else. The
+// delay slot may be a nop or "addiu rY,rY,imm" (an idle counter), which
+// cpu_skip keeps up to date.
+typedef struct { uint32_t pc; int8_t cnt_reg; int16_t cnt_imm; } poll_loop_t;
+static poll_loop_t idle_loop;   // loop that set cpu_idle
+
+static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
+{
+    static poll_loop_t yes[16];
+    static uint32_t no[64];
+    static int nyes, nno;
+    for (int i = 0; i < nyes; i++) if (yes[i].pc == pc) { idle_loop = yes[i]; return true; }
+    for (int i = 0; i < nno && i < 64; i++) if (no[i] == pc) return false;
+
+    bool match = false;
+    poll_loop_t l = { pc, -1, 0 };
+    uint8_t *p = mem_ptr(pc & 0x1fffffffu);
+    if (p && (pc & 0xe0000000u) == 0x80000000u) {
+        uint32_t w[5];
+        memcpy(w, p, sizeof w);
+        int rt = (op >> 16) & 31;
+        match = w[1] == 0 &&
+                (w[2] >> 26) == 0x0c && ((w[2] >> 21) & 31) == rt && ((w[2] >> 16) & 31) == rt &&
+                (w[2] & 0xffff) && !(w[2] & 0x80ff) &&                       // IP2..IP6 only
+                ((w[3] >> 26) == 0x04 || (w[3] >> 26) == 0x05) &&
+                ((w[3] >> 21) & 31) == rt && ((w[3] >> 16) & 31) == 0 &&
+                (int16_t)w[3] == -4;
+        if (match && w[4] != 0) {
+            int ry = (w[4] >> 16) & 31;
+            if ((w[4] >> 26) == 0x09 && ((w[4] >> 21) & 31) == ry && ry != rt && ry != 0) {
+                l.cnt_reg = (int8_t)ry;
+                l.cnt_imm = (int16_t)w[4];
+            } else match = false;
+        }
+    }
+    if (match) { if (nyes < 16) yes[nyes++] = l; idle_loop = l; }
+    else no[nno++ % 64] = pc;
+    return match;
+}
 
 /* ---------------------------------------------------------------- */
 /* Exceptions and interrupts                                        */
@@ -762,6 +777,10 @@ void cpu_reset(void)
 
 void cpu_skip(uint64_t n)
 {
+    if (cpu_idle && idle_loop.cnt_reg > 0) {
+        int r = idle_loop.cnt_reg;
+        cpu.r[r] = SX32((uint32_t)cpu.r[r] + (uint32_t)(n / 5) * (uint32_t)(int32_t)idle_loop.cnt_imm);
+    }
     uint32_t count = (uint32_t)cpu.cp0[CP0_COUNT];
     uint32_t ticks = (uint32_t)((cpu.count_frac + n) / 2 - cpu.count_frac / 2);
     uint32_t to_compare = (uint32_t)cpu.cp0[CP0_COMPARE] - count;

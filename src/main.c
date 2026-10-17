@@ -107,9 +107,9 @@ static void pump_audio(SDL_AudioDeviceID dev)
     }
     pos -= n;
     if (n) prev = in[n - 1];
-    // keep latency bounded: drop audio if more than ~120 ms is queued
-    if (SDL_GetQueuedAudioSize(dev) < AUDIO_HZ * 2 * 120 / 1000)
-        SDL_QueueAudio(dev, out, (Uint32)m * 2);
+    // after a long hitch, throw away the backlog instead of lagging behind
+    if (SDL_GetQueuedAudioSize(dev) > AUDIO_HZ * 2 * 250 / 1000) SDL_ClearQueuedAudio(dev);
+    SDL_QueueAudio(dev, out, (Uint32)m * 2);
 }
 
 typedef struct { SDL_Scancode key; uint32_t *port; uint32_t bit; } keymap_t;
@@ -131,6 +131,42 @@ static keymap_t keys[] = {
     { SDL_SCANCODE_9, &hw.p2, 0x2000 },
 };
 
+// Scripted input for headless runs: "frame:button:duration,..."
+typedef struct { const char *name; uint32_t *port; uint32_t bit; } button_t;
+static const button_t buttons[] = {
+    { "p1hq", &hw.p1, 0x0001 }, { "p1hm", &hw.p1, 0x0002 }, { "p1hf", &hw.p1, 0x0004 },
+    { "p1lq", &hw.p1, 0x0008 }, { "p1lm", &hw.p1, 0x0010 }, { "p1lf", &hw.p1, 0x0020 },
+    { "p1up", &hw.p1, 0x0040 }, { "p1down", &hw.p1, 0x0080 }, { "p1left", &hw.p1, 0x0100 },
+    { "p1right", &hw.p1, 0x0200 }, { "start1", &hw.p1, 0x0400 }, { "coin1", &hw.p1, 0x0800 },
+    { "test", &hw.p1, 0x1000 },
+    { "p2hq", &hw.p2, 0x0001 }, { "p2lq", &hw.p2, 0x0008 }, { "p2left", &hw.p2, 0x0100 },
+    { "p2right", &hw.p2, 0x0200 }, { "start2", &hw.p2, 0x0400 }, { "coin2", &hw.p2, 0x0800 },
+};
+typedef struct { int frame, len; const button_t *b; } script_ev_t;
+static script_ev_t script[256];
+static int nscript;
+
+static void parse_script(const char *spec)
+{
+    char buf[4096];
+    snprintf(buf, sizeof buf, "%s", spec);
+    for (char *tok = strtok(buf, ","); tok && nscript < 256; tok = strtok(NULL, ",")) {
+        int frame, len = 6;
+        char name[32];
+        if (sscanf(tok, "%d:%31[a-z0-9]:%d", &frame, name, &len) < 2) continue;
+        for (size_t i = 0; i < sizeof buttons / sizeof buttons[0]; i++)
+            if (!strcmp(buttons[i].name, name)) { script[nscript++] = (script_ev_t){ frame, len, &buttons[i] }; break; }
+    }
+}
+
+static void apply_script(int frame)
+{
+    hw.p1 = hw.p2 = 0xffffffffu;
+    for (int i = 0; i < nscript; i++)
+        if (frame >= script[i].frame && frame < script[i].frame + script[i].len)
+            *script[i].b->port &= ~script[i].b->bit;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -140,6 +176,7 @@ static void usage(void)
         "  --sound DIR     directory holding ki2_l1.u10..u36\n"
         "  --headless N    run N frames without a window\n"
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
+        "  --script S      headless input, e.g. \"3600:coin1:6,3700:start1:6\"\n"
         "  --trace         log every executed instruction\n");
 }
 
@@ -155,6 +192,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--headless") && i + 1 < argc) headless = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--trace")) cpu_trace = true;
+        else if (!strcmp(argv[i], "--script") && i + 1 < argc) parse_script(argv[++i]);
         else if (!strcmp(argv[i], "--trace-from") && i + 1 < argc) trace_from = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dis") && i + 2 < argc) { dis_addr = (uint32_t)strtoul(argv[++i], 0, 16); dis_count = atoi(argv[++i]); }
         else { usage(); return 1; }
@@ -196,7 +234,15 @@ int main(int argc, char **argv)
         if (wav) fseek(wav, 44, SEEK_SET);
         for (int f = 1; f <= headless; f++) {
             if (trace_from && f == trace_from) cpu_trace = true;
+            apply_script(f);
+            uint64_t t0 = SDL_GetPerformanceCounter();
             run_frame();
+            static double acc_ms;
+            acc_ms += (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+            if (f % 60 == 0) {
+                if (getenv("KI2_SPEED")) fprintf(stderr, "frames %d-%d: %.1f ms/frame (%.0f%% speed)\n", f - 59, f, acc_ms / 60, 100.0 * (1000.0 / FRAME_HZ) / (acc_ms / 60));
+                acc_ms = 0;
+            }
             if (getenv("KI2_DUMP_AT") && f == atoi(getenv("KI2_DUMP_AT"))) {
                 FILE *o = fopen("ram0.bin", "wb"); fwrite(ram0, 1, RAM0_SIZE, o); fclose(o);
                 o = fopen("ram2.bin", "wb"); fwrite(ram2, 1, RAM2_SIZE, o); fclose(o);
@@ -232,7 +278,7 @@ int main(int argc, char **argv)
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     SDL_Window *win = SDL_CreateWindow("Killer Instinct 2", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        960, 720, SDL_WINDOW_RESIZABLE);
-    SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     SDL_RenderSetLogicalSize(ren, 320, 240);
     SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 240);
     SDL_AudioSpec want = { .freq = AUDIO_HZ, .format = AUDIO_S16SYS, .channels = 1, .samples = 1024 }, have;
@@ -263,10 +309,16 @@ int main(int argc, char **argv)
         SDL_RenderCopy(ren, tex, NULL, NULL);
         SDL_RenderPresent(ren);
 
-        next += (uint64_t)(freq / FRAME_HZ);
-        uint64_t now = SDL_GetPerformanceCounter();
-        if (now < next) SDL_Delay((uint32_t)((next - now) * 1000 / freq));
-        else next = now;
+        if (adev) {
+            // the audio device is the clock: keep ~50 ms queued, run ahead otherwise
+            while (SDL_GetQueuedAudioSize(adev) > AUDIO_HZ * 2 * 50 / 1000) SDL_Delay(1);
+            next = SDL_GetPerformanceCounter();
+        } else {
+            next += (uint64_t)(freq / FRAME_HZ);
+            uint64_t now = SDL_GetPerformanceCounter();
+            if (now < next) SDL_Delay((uint32_t)((next - now) * 1000 / freq));
+            else next = now;
+        }
     }
     SDL_Quit();
     return 0;
