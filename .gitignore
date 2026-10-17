@@ -1,0 +1,6 @@
+build/
+ki2
+run/
+*.ppm
+*.png
+*.bin
