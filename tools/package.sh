@@ -46,7 +46,8 @@ echo "TinyCC source: https://repo.or.cz/tinycc.git, commit e23dabe (built unmodi
 # shaders; the GPL extras are shipped as the source files they are
 cp -r shaders "$out/"
 if [ -d shaders/extra ]; then
-    cp tools/gpl-2.0.txt "$out/licenses/GPL-2.0-shaders-extra.txt"
+    cp tools/gpl-2.0.txt "$out/licenses/GPL-2.0-shaders-extra.txt"   # crt-guest, crt-royale, ...
+    cp tools/gpl-3.0.txt "$out/licenses/GPL-3.0-shaders-extra.txt"   # xBRZ
 fi
 
 if [ $target = windows ]; then

@@ -39,4 +39,4 @@ affiliated with or endorsed by them.
 Licences for the bundled parts are in the "licenses" folder: SDL2 (zlib),
 Zig (MIT), TinyCC (LGPL 2.1, used as a separate library; source: see
 tools/tcc/SOURCE.txt), shaders (licence header in each file; those in
-shaders/extra are GPL 2.0 or later).
+shaders/extra are GPL: xBRZ GPL 3.0, the others GPL 2.0 or later).
