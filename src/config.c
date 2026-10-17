@@ -32,11 +32,13 @@ static const char *const pad_defaults[NBUTTONS] = {
     "x", "y", "rightshoulder", "a", "b", "righttrigger", "dpup", "dpdown", "dpleft", "dpright", "start", "back",
 };
 static const char *const hotkey_names[NHOTKEYS] = {
-    "pause", "frame_advance", "fast_forward", "fullscreen", "screenshot",
-    "volume_up", "volume_down", "mute", "test", "service", "game_volume_up", "game_volume_down",
+    "menu", "pause", "frame_advance", "fast_forward", "rewind", "save_state", "load_state", "next_slot",
+    "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test", "service",
+    "game_volume_up", "game_volume_down",
 };
 static const char *const hotkey_defaults[NHOTKEYS] = {
-    "P", ".", "Tab", "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown",
+    "F1", "P", ".", "Tab", "Backspace", "F5", "F7", "F6",
+    "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown",
 };
 
 #define MAX_OPTS 96
@@ -71,6 +73,11 @@ static void build_table(void)
         "fast-forward this many frames at startup (90 = blank boot screens, 1000 = to the K2 logo)", 0);
     add("system", "auto_coin", T_BOOL, &cfg.auto_coin, "yes", "Start inserts coins when there are not enough credits", 0);
     add("system", "fast_forward_speed", T_INT, &cfg.fast_speed, "0", "fast-forward limit in x realtime, 0 = as fast as possible", 0);
+    add("system", "run_ahead", T_INT, &cfg.run_ahead, "0",
+        "0-2: hide the game's built-in input lag (1 frame) by emulating ahead; 1 is enough, 2 needs a fast CPU", 0);
+    add("system", "rewind", T_BOOL, &cfg.rewind, "yes", "keep a rewind history (hold the rewind hotkey)", 0);
+    add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "256", "memory for it; about 85 KB per frame (256 MB = ~50 s)", 0);
+    add("system", "state_slot", T_INT, &cfg.state_slot, "1", "save state slot used by the hotkeys, 1-9", 0);
 
     for (int p = 0; p < 2; p++)
         for (int b = 0; b < NBUTTONS; b++) {
@@ -83,7 +90,8 @@ static void build_table(void)
     for (int h = 0; h < NHOTKEYS; h++) {
         snprintf(hk_keys[h], 24, "%s", hotkey_defaults[h]);
         add("hotkeys", hotkey_names[h], T_KEY, &cfg.hotkeys[h], hk_keys[h],
-            h == HK_FAST ? "hold to fast-forward" : h == HK_STEP ? "while paused, advance one frame" : 0, 0);
+            h == HK_MENU ? "settings menu (Esc also opens it)" : h == HK_FAST ? "hold to fast-forward" :
+            h == HK_REWIND ? "hold to rewind" : h == HK_STEP ? "while paused, advance one frame" : 0, 0);
     }
     for (int b = 0; b < NBUTTONS; b++) {
         snprintf(pad_keys[b], 24, "%s", pad_defaults[b]);
@@ -92,6 +100,9 @@ static void build_table(void)
                      " dpleft dpright leftstick rightstick; first pad = player 1, second = player 2" : 0, 0);
     }
     add("gamepad", "deadzone", T_INT, &cfg.pad_deadzone, "16000", "left stick deadzone, 0-32767", 0);
+    add("gamepad", "menu", T_PAD, &cfg.pad_menu, "guide", "hotkeys on the pad (Back+Start also opens the menu)", 0);
+    add("gamepad", "rewind", T_PAD, &cfg.pad_rewind, "", "hold to rewind, e.g. leftshoulder", 0);
+    add("gamepad", "fast_forward", T_PAD, &cfg.pad_fast, "", "hold to fast-forward, e.g. lefttrigger", 0);
 }
 
 static int parse_pad(const char *v)
@@ -135,25 +146,62 @@ static char *trim(char *s)
     return s;
 }
 
-static void write_default(const char *path)
+static char cfg_path[4096];
+
+static const char *pad_name(int b)
+{
+    if (b == PAD_LT) return "lefttrigger";
+    if (b == PAD_RT) return "righttrigger";
+    if (b == PAD_NONE) return "";
+    const char *s = SDL_GameControllerGetStringForButton((SDL_GameControllerButton)b);
+    return s ? s : "";
+}
+
+static void format(const opt_t *o, char *buf, size_t n, bool defaults)
+{
+    if (defaults) { snprintf(buf, n, "%s", o->def); return; }
+    switch (o->type) {
+    case T_STR: snprintf(buf, n, "%s", (const char *)o->ptr); break;
+    case T_INT: snprintf(buf, n, "%d", *(int *)o->ptr); break;
+    case T_BOOL: snprintf(buf, n, "%s", *(bool *)o->ptr ? "yes" : "no"); break;
+    case T_ENUM: snprintf(buf, n, "%s", o->names[*(int *)o->ptr]); break;
+    case T_KEY: {
+        SDL_Scancode sc = *(SDL_Scancode *)o->ptr;
+        snprintf(buf, n, "%s", sc ? SDL_GetScancodeName(sc) : "");
+        break;
+    }
+    case T_PAD: snprintf(buf, n, "%s", pad_name(*(int *)o->ptr)); break;
+    }
+}
+
+static bool write_file(const char *path, bool defaults)
 {
     FILE *f = fopen(path, "w");
-    if (!f) return;
+    if (!f) return false;
     fprintf(f, "; Killer Instinct 2 settings. Delete this file to get the defaults back.\n");
     const char *sec = "";
     for (int i = 0; i < nopts; i++) {
         opt_t *o = &opts[i];
+        char val[1024];
         if (strcmp(sec, o->section)) { fprintf(f, "\n[%s]\n", o->section); sec = o->section; }
         if (o->help) fprintf(f, "; %s\n", o->help);
-        fprintf(f, "%s = %s\n", o->key, o->def);
+        format(o, val, sizeof val, defaults);
+        fprintf(f, "%s = %s\n", o->key, val);
     }
-    fclose(f);
-    fprintf(stderr, "config: wrote defaults to %s\n", path);
+    return fclose(f) == 0;
+}
+
+bool config_save(void) { return *cfg_path && write_file(cfg_path, false); }
+
+static void write_default(const char *path)
+{
+    if (write_file(path, true)) fprintf(stderr, "config: wrote defaults to %s\n", path);
 }
 
 void config_load(const char *path)
 {
     build_table();
+    snprintf(cfg_path, sizeof cfg_path, "%s", path);
     for (int i = 0; i < nopts; i++) set(&opts[i], opts[i].def);
 
     FILE *f = fopen(path, "r");

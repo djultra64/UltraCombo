@@ -4,8 +4,8 @@
 #include "sound.h"
 #include <stdio.h>
 
-uint8_t ram0[RAM0_SIZE];
-uint8_t ram2[RAM2_SIZE];
+uint8_t ram[RAM_SIZE];
+uint8_t ram_dirty[RAM_PAGES];
 uint8_t rom[ROM_SIZE];
 hw_t hw = { .p1 = 0xffffffffu, .p2 = 0xffffffffu, .volume = 0xffffffffu, .dsw = 0xffffffffu };
 

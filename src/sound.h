@@ -2,6 +2,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 bool   sound_init(const char *rom_dir);
 void   sound_reset_w(bool state);      // bit 0 of the sound reset register
@@ -10,3 +11,4 @@ bool   sound_input_empty(void);        // DCS has consumed the last command word
 void   sound_run(int cycles);          // advance the sound DSP (10 MHz cycles)
 double sound_rate(void);               // current output sample rate in Hz
 int    sound_fetch(int16_t *out, int max);
+size_t sound_state(uint8_t *buf, bool load);   // board + DSP, for save states

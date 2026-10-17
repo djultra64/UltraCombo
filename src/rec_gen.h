@@ -63,7 +63,7 @@ static inline void rec_ddivu(uint64_t rs, uint64_t rt)
     } while (0)
 #define ST(T, val, va, size, PC, DL) do {                                   \
         uint32_t _a = (va); uint8_t *_p = rec_st_ptr(_a); T _v = (T)(val);   \
-        if (_p && !(_a & (size - 1))) memcpy(_p, &_v, size);                 \
+        if (_p && !(_a & (size - 1))) { memcpy(_p, &_v, size); ram_touch(_p); } \
         else { rec_store(_a, (uint64_t)_v, size, PC, DL); if (cpu_exc) return; } \
     } while (0)
 
@@ -80,7 +80,7 @@ static inline bool rec_ld_aligned(uint64_t *w, uint32_t a, int size, uint32_t pc
 static inline bool rec_st_aligned(uint64_t w, uint32_t a, int size, uint32_t pc, bool dl)
 {
     uint8_t *p = rec_st_ptr(a);
-    if (p) { if (size == 8) memcpy(p, &w, 8); else { uint32_t v = (uint32_t)w; memcpy(p, &v, 4); } return true; }
+    if (p) { if (size == 8) memcpy(p, &w, 8); else { uint32_t v = (uint32_t)w; memcpy(p, &v, 4); } ram_touch(p); return true; }
     rec_store(a, w, size, pc, dl);
     return !cpu_exc;
 }

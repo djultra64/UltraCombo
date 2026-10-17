@@ -1,3 +1,4 @@
+#include <stddef.h>
 // ADSP-2105 interpreter.
 // Instruction semantics follow the ADSP-2100 Family User's Manual; edge cases
 // (rounding, shifter NORM/EXP, SPORT autobuffer setup) were checked against
@@ -1032,4 +1033,17 @@ void adsp_reset(void)
 }
 
 uint32_t *adsp_internal_pm(void) { return a.ipm; }
+
+size_t adsp_state(uint8_t *buf, bool load)
+{
+    if (buf && load) {
+        adsp_hooks_t h = a.h;
+        memcpy(&a, buf, sizeof a);
+        a.h = h;
+    } else if (buf) {
+        memcpy(buf, &a, sizeof a);
+        memset(buf + offsetof(__typeof__(a), h), 0, sizeof a.h);        // keep states pointer-free
+    }
+    return sizeof a;
+}
 uint16_t adsp_pc(void) { return a.pc; }

@@ -2,6 +2,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct {
     uint64_t mask, hi, lo0, lo1;
@@ -63,6 +64,7 @@ void cpu_skip(uint64_t n);
 // scanline boundary; cpu_run returns early and the caller may skip ahead.
 extern bool cpu_idle;
 void cpu_exception(int code, uint32_t badvaddr, bool has_badvaddr);
+size_t cpu_state(uint8_t *buf, bool load);     // save state; NULL buf: size only
 
 // Debug hooks
 extern bool cpu_trace;

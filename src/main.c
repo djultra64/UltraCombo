@@ -6,6 +6,7 @@
 #include "mem.h"
 #include "rec.h"
 #include "sound.h"
+#include "state.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,8 +52,39 @@ const char *find_data(const char *name, char *buf, size_t n)
     return readable(buf) ? buf : name;
 }
 
+static struct {
+    int sound_acc;        // CPU cycles not yet passed on to the DCS
+    uint64_t frame;       // frames run since power-on
+} m;
+#define sound_acc m.sound_acc
+
+uint64_t machine_frame(void) { return m.frame; }
+
+size_t machine_state(uint8_t *buf, bool load)
+{
+    if (buf && load) { memcpy(&m, buf, sizeof m); memcpy(&hw, buf + sizeof m, sizeof hw); }
+    else if (buf) { memcpy(buf, &m, sizeof m); memcpy(buf + sizeof m, &hw, sizeof hw); }
+    return sizeof m + sizeof hw;
+}
+
+// Power-cycle: as at startup, without reloading anything from disk.
+void machine_reset(void)
+{
+    memset(ram, 0, RAM_SIZE);
+    memset(&m, 0, sizeof m);
+    hw = (hw_t){ .p1 = 0xffffffffu, .p2 = 0xffffffffu, .volume = 0xffffffffu, .dsw = 0xffffffffu };
+    sound_reset_w(false);     // DCS reset pulse
+    sound_reset_w(true);
+    ide_devctl(4);            // drive software reset
+    ide_devctl(0);
+    cpu_reset();
+    rec_forget();
+    state_init();
+}
+
 void run_frame(void)
 {
+    m.frame++;
     for (int line = 0; line < LINES; line++) {
         if (line == VISIBLE_LINES) cpu_set_irq(0, true);
         if (line == 0) cpu_set_irq(0, false);
@@ -67,7 +99,6 @@ void run_frame(void)
             }
             ide_tick(slice);
             // DCS runs at 10 MHz against the 100 MHz R4600
-            static int sound_acc;
             sound_acc += slice;
             sound_run(sound_acc / 10);
             sound_acc %= 10;
@@ -148,6 +179,10 @@ static void usage(void)
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
         "  --script S      headless input, e.g. \"3600:coin1:6,3700:start1:6\"\n"
         "  --trace         log every executed instruction\n"
+        "  --save-at F P   in headless mode, save a state file P after frame F\n"
+        "  --load P        start from state file P\n"
+        "  --rewind-test N headless: every N frames rewind N, replay, and check the state matches\n"
+        "  --runahead N    headless: run N frames ahead and roll back after each frame\n"
         "Settings, key bindings and hotkeys are in ki2.ini beside the executable\n"
         "(written with defaults on first run). See README.md.\n");
 }
@@ -161,6 +196,8 @@ int main(int argc, char **argv)
     const char *disk_path = *cfg.disk ? cfg.disk : "kinst2.raw";
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
+    int save_at = 0, rewind_test = 0, runahead = 0;
+    const char *save_path = NULL, *load_path = NULL;
     uint32_t dis_addr = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_path = argv[++i];
@@ -171,6 +208,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--trace")) cpu_trace = true;
         else if (!strcmp(argv[i], "--script") && i + 1 < argc) parse_script(argv[++i]);
         else if (!strcmp(argv[i], "--trace-from") && i + 1 < argc) trace_from = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--save-at") && i + 2 < argc) { save_at = atoi(argv[++i]); save_path = argv[++i]; }
+        else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
+        else if (!strcmp(argv[i], "--rewind-test") && i + 1 < argc) rewind_test = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--runahead") && i + 1 < argc) runahead = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dis") && i + 2 < argc) { dis_addr = (uint32_t)strtoul(argv[++i], 0, 16); dis_count = atoi(argv[++i]); }
         else { usage(); return 1; }
     }
@@ -209,15 +250,43 @@ int main(int argc, char **argv)
     // KI2_INTERP_HIST=file: where the interpreter still runs (missing entry points)
     if (headless && getenv("KI2_INTERP_HIST")) cpu_interp_hist = calloc(1 << 16, sizeof *cpu_interp_hist);
 
+    state_init();
+    if (load_path) {
+        if (!state_load_file(load_path)) { fprintf(stderr, "%s: cannot load state\n", load_path); return 1; }
+        fprintf(stderr, "loaded %s at frame %llu\n", load_path, (unsigned long long)machine_frame());
+    }
+
     if (headless) {
+        if (rewind_test || getenv("KI2_HISTORY")) state_set_history((size_t)1 << 30);
+        int rewind_fail = 0;
         FILE *wav = getenv("KI2_WAV") ? fopen(getenv("KI2_WAV"), "wb") : NULL;
         uint32_t wav_samples = 0;
         if (wav) fseek(wav, 44, SEEK_SET);
-        for (int f = 1; f <= headless; f++) {
+        for (int f = (int)machine_frame() + 1; f <= headless; f++) {
             if (trace_from && f == trace_from) cpu_trace = true;
             apply_script(f);
             uint64_t t0 = SDL_GetPerformanceCounter();
             run_frame();
+            state_checkpoint();
+            if (runahead) {
+                for (int k = 0; k < runahead; k++) run_frame();
+                state_rollback();
+            }
+            if (save_at && f == save_at) {
+                if (state_save_file(save_path)) fprintf(stderr, "saved %s at frame %d\n", save_path, f);
+                else fprintf(stderr, "%s: save failed\n", save_path);
+            }
+            if (rewind_test && f % rewind_test == 0 && f > rewind_test) {
+                // go back N frames, replay them with the same input, compare
+                uint64_t want = state_hash();
+                int n = 0;
+                while (n < rewind_test && state_rewind()) n++;
+                for (int k = f - n + 1; k <= f; k++) { apply_script(k); run_frame(); state_checkpoint(); }
+                uint64_t got = state_hash();
+                if (got != want) rewind_fail++;
+                fprintf(stderr, "rewind test frame %d: back %d, %s (%.1f MB history)\n", f, n,
+                        got == want ? "match" : "MISMATCH", state_history_bytes() / 1048576.0);
+            }
             static double acc_ms, max_ms;
             double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
             acc_ms += ms;
@@ -247,6 +316,8 @@ int main(int argc, char **argv)
             }
         }
         save_ppm("frame_last.ppm");
+        fprintf(stderr, "state hash %016llx at frame %llu\n", (unsigned long long)state_hash(), (unsigned long long)machine_frame());
+        if (rewind_fail) { fprintf(stderr, "%d rewind mismatches\n", rewind_fail); return 3; }
         if (cpu_interp_hist) {
             FILE *h = fopen(getenv("KI2_INTERP_HIST"), "w");
             for (int i = 0; i < 1 << 16; i++) if (cpu_interp_hist[i] > 1000) fprintf(h, "%08x %u\n", 0x88000000u + i * 4, cpu_interp_hist[i]);

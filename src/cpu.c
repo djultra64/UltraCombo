@@ -260,7 +260,7 @@ static void cover_note_smc(uint32_t pa)
             if (pa >= 0x1fc00000u) return; /* ROM */                        \
             if (cover && cover_hit(pa)) cover_note_smc(pa);                 \
             if (pa - rec_code_lo < rec_code_size) rec_code_gen++;           \
-            memcpy(p, &v, size); return;                                    \
+            memcpy(p, &v, size); ram_touch(p); return;                      \
         }                                                                   \
         if (size == 8) {                                                    \
             io_write(pa, (uint32_t)v, 4); io_write(pa + 4, (uint32_t)((uint64_t)v >> 32), 4); \
@@ -857,6 +857,16 @@ void cpu_reset(void)
         cover_lead = calloc(1, (RAM0_SIZE + RAM2_SIZE) / 32);
         atexit(cover_save);
     }
+}
+
+size_t cpu_state(uint8_t *buf, bool load)
+{
+    if (buf && load) {
+        memcpy(&cpu, buf, sizeof cpu);
+        irq_dirty = true;       // safe: a check with nothing pending changes nothing
+        tlbc_flush();
+    } else if (buf) memcpy(buf, &cpu, sizeof cpu);
+    return sizeof cpu;
 }
 
 void cpu_skip(uint64_t n)

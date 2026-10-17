@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -32,6 +33,24 @@ static struct {
     bool irq;
     uint16_t identify[256];
 } d;
+
+uint8_t ide_dirty[IDE_TRACK_PAGES];
+
+uint8_t *ide_tracked(void) { return d.img; }
+
+size_t ide_state(uint8_t *buf, bool load)
+{
+    if (buf && load) {
+        uint8_t *img = d.img;
+        uint64_t size = d.size;
+        memcpy(&d, buf, sizeof d);
+        d.img = img; d.size = size;
+    } else if (buf) {
+        memcpy(buf, &d, sizeof d);
+        memset(buf + offsetof(__typeof__(d), img), 0, sizeof d.img);    // keep states pointer-free
+    }
+    return sizeof d;
+}
 
 static void set_irq(bool s)
 {
@@ -209,7 +228,15 @@ static void data_write(uint16_t v)
     if (!d.writing || !(d.status & ST_DRQ)) return;
     d.buf[d.buf_pos++] = v;
     if (d.buf_pos >= 256) {
-        if (d.lba < d.total) memcpy(d.img + (uint64_t)d.lba * 512, d.buf, 512);
+        if (d.lba < d.total) {
+            memcpy(d.img + (uint64_t)d.lba * 512, d.buf, 512);
+            if (d.lba * 512 < IDE_TRACK_BYTES) ide_dirty[d.lba * 512 >> 12] = 1;
+            else {
+                static bool warned;
+                if (!warned) fprintf(stderr, "ide: write to sector %u is not covered by save states\n", d.lba);
+                warned = true;
+            }
+        }
         d.lba++;
         set_lba_regs(d.lba);
         d.count--;

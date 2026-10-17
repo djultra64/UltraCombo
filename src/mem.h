@@ -2,14 +2,25 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #define RAM0_SIZE 0x80000u     // phys 0x00000000: 512 KB (holds the framebuffers)
 #define RAM2_SIZE 0x800000u    // phys 0x08000000: 8 MB
 #define ROM_SIZE  0x80000u     // phys 0x1fc00000: boot EPROM U98
 
-extern uint8_t ram0[RAM0_SIZE];
-extern uint8_t ram2[RAM2_SIZE];
+#define RAM_SIZE  (RAM0_SIZE + RAM2_SIZE)
+#define RAM_PAGES (RAM_SIZE >> 12)
+
+// Both RAMs live in one array so save states can track them page by page.
+extern uint8_t ram[RAM_SIZE];
+#define ram0 (ram)
+#define ram2 (ram + RAM0_SIZE)
 extern uint8_t rom[ROM_SIZE];
+
+// Set for each 4 KB page of `ram` written since the last state checkpoint.
+// Every store into RAM must mark its page (stores never cross a page).
+extern uint8_t ram_dirty[RAM_PAGES];
+static inline void ram_touch(const uint8_t *p) { ram_dirty[(size_t)(p - ram) >> 12] = 1; }
 
 // Returns a host pointer for plain memory, or NULL for I/O space.
 static inline uint8_t *mem_ptr(uint32_t pa)

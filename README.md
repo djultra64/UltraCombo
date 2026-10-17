@@ -37,16 +37,35 @@ The first pad connected is player 1, the second player 2.
 
 | Hotkey | |
 |---|---|
+| Esc or F1 | Menu (pad: Guide, or Back+Start) |
+| F5 / F7 | Save / load state in the current slot |
+| F6 | Next state slot (1-9) |
+| Backspace (hold) | Rewind |
+| Tab (hold) | Fast-forward |
 | P | Pause |
 | . | Frame advance (pauses first) |
-| Tab (hold) | Fast-forward |
-| F11 or Alt+Enter | Fullscreen (Esc leaves it) |
+| F11 or Alt+Enter | Fullscreen |
 | F12 | Screenshot to `screenshots/` |
 | = / - / M | Volume up / down / mute |
 | F2 | Operator test menu |
 | 9 | Service credit |
 | Page Up / Page Down | The cabinet's own volume buttons |
-| Esc | Quit |
+
+The menu has save/load, run-ahead, rewind, video, volume and auto-coin
+settings, Reset and Quit; changes are saved to `ki2.ini` when it closes.
+
+## Save states, rewind and run-ahead
+
+States go to `states/slot1.ki2s` … `slot9.ki2s` (about 6 MB each). They
+include the disk's settings sectors, and only load into the same build and
+ROM version.
+
+Rewind keeps about 50 seconds by default (`rewind_mb = 256`).
+
+KI2 shows the result of an input one frame after it is read. Run-ahead 1
+hides that frame by quietly emulating one frame ahead each frame. It costs
+about one extra frame of CPU time; 2 frames is possible on a fast CPU but
+does not remove any more of this game's lag.
 
 Everything above can be changed in `ki2.ini`, which is written with
 comments on first run. It also has video scaling (`fit`, `integer`,

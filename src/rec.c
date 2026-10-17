@@ -37,19 +37,55 @@ static bool func_matches(uint32_t f)
     return ok;
 }
 
-// Code was written since the map was built: rebuild it lazily, entry by entry.
-// While code is being loaded (stores every few instructions) this only runs
-// every 10 ms of game time; the interpreter covers the gap.
-rec_fn_t rec_lookup_slow(uint32_t pc)
+static uint64_t last_rebuild;
+
+// Forget everything learned about RAM contents (after loading a state file).
+void rec_forget(void)
 {
-    static uint64_t last;
-    if (cpu.cycles - last < 1000000 && last) return 0;
-    last = cpu.cycles;
+    if (!rec_enabled) return;
+    memset(func_ok_gen, 0, rec_nfuncs * sizeof *func_ok_gen);
+    memset(func_bad_gen, 0, rec_nfuncs * sizeof *func_bad_gen);
+    rec_map_gen = 0;           // generations start at 1, so this never matches
+}
+
+static void rebuild(void)
+{
     memset(rec_map, 0, rec_image_words * sizeof *rec_map);
     for (uint32_t i = 0; i < rec_nlabels; i++) {
         const rec_label_t *l = &rec_labels[i];
         if (func_matches(l->fn)) rec_map[(l->pc - rec_image_base) >> 2] = rec_funcs[l->fn].fn;
     }
     rec_map_gen = rec_code_gen;
+}
+
+// Code was written since the map was built: rebuild it lazily, entry by entry.
+// While code is being loaded (stores every few instructions) this only runs
+// every 10 ms of game time; the interpreter covers the gap.
+rec_fn_t rec_lookup_slow(uint32_t pc)
+{
+    if (cpu.cycles - last_rebuild < 1000000 && last_rebuild) return 0;
+    last_rebuild = cpu.cycles;
+    rebuild();
     return rec_map[(pc - rec_image_base) >> 2];
+}
+
+// Which code runs translated must not change across a state load, or the
+// replay would take a different (interpreted vs compiled) path. RAM is
+// restored first, so rebuilding from it reproduces the saved map exactly.
+size_t rec_state(uint8_t *buf, bool load)
+{
+    struct { uint32_t gen; bool map_valid; uint64_t last; } s;
+    if (buf && load) {
+        memcpy(&s, buf, sizeof s);
+        if (rec_enabled) {
+            rec_code_gen = s.gen;
+            last_rebuild = s.last;
+            if (s.map_valid) { if (rec_map_gen != rec_code_gen) rebuild(); }
+            else rec_map_gen = rec_code_gen - 1;
+        }
+    } else if (buf) {
+        s.gen = rec_code_gen; s.map_valid = rec_map_gen == rec_code_gen; s.last = last_rebuild;
+        memcpy(buf, &s, sizeof s);
+    }
+    return sizeof s;
 }

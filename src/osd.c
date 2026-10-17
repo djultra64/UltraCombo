@@ -68,3 +68,34 @@ void osd_draw(uint32_t *px, const char *status)
     if (msg[0] && SDL_TICKS_PASSED(SDL_GetTicks(), msg_until)) msg[0] = 0;
     if (msg[0]) draw_label(px, 4, 240 - 15, msg);
 }
+
+// A centred panel: title, then one row per item with the selected one highlighted.
+// Each item is "label\tvalue" (value optional).
+void osd_menu(uint32_t *px, const char *title, const char *const *items, int n, int sel, const char *footer)
+{
+    int w = 220, row = 10, h = 22 + n * row + (footer ? 14 : 0);
+    int x0 = (320 - w) / 2, y0 = (240 - h) / 2;
+    for (int y = 0; y < 240; y++)                    // dim the game
+        for (int x = 0; x < 320; x++) px[y * 320 + x] = (px[y * 320 + x] >> 1) & 0x7f7f7f;
+    for (int y = y0; y < y0 + h; y++)
+        for (int x = x0; x < x0 + w; x++)
+            px[y * 320 + x] = (y == y0 || y == y0 + h - 1 || x == x0 || x == x0 + w - 1) ? 0xc08020 : 0x101018;
+    draw_text(px, x0 + (w - (int)strlen(title) * 6) / 2, y0 + 5, title, 0xffc040);
+    for (int i = 0; i < n; i++) {
+        int y = y0 + 18 + i * row;
+        char label[64];
+        const char *tab = strchr(items[i], '\t');
+        size_t len = tab ? (size_t)(tab - items[i]) : strlen(items[i]);
+        snprintf(label, sizeof label, "%.*s", (int)len, items[i]);
+        if (i == sel)
+            for (int yy = y - 1; yy < y + 8; yy++)
+                for (int x = x0 + 2; x < x0 + w - 2; x++) px[yy * 320 + x] = 0x604010;
+        uint32_t c = i == sel ? 0xffffff : 0xb0b0b0;
+        draw_text(px, x0 + 8, y, label, c);
+        if (tab) {
+            const char *v = tab + 1;
+            draw_text(px, x0 + w - 8 - (int)strlen(v) * 6, y, v, i == sel ? 0xffe080 : 0x80c0ff);
+        }
+    }
+    if (footer) draw_text(px, x0 + (w - (int)strlen(footer) * 6) / 2, y0 + h - 11, footer, 0x808080);
+}

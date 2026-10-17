@@ -10,6 +10,7 @@
 #include "osd.h"
 #include "png.h"
 #include "sound.h"
+#include "state.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -106,10 +107,13 @@ static void set_fullscreen(bool on)
     SDL_ShowCursor(on ? SDL_DISABLE : SDL_ENABLE);
 }
 
+static void draw_menu(uint32_t *px);
+
 static void present(const char *status)
 {
     to_rgb(px);
     osd_draw(px, status);
+    draw_menu(px);
     SDL_UpdateTexture(tex, NULL, px, 320 * 4);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
@@ -257,12 +261,173 @@ static void set_ports(const uint32_t held[2])
 
 static bool is_hotkey(SDL_Scancode sc, int hk) { return cfg.hotkeys[hk] && sc == cfg.hotkeys[hk]; }
 
+static bool key_held(int hk)
+{
+    const uint8_t *ks = SDL_GetKeyboardState(NULL);
+    return cfg.hotkeys[hk] && ks[cfg.hotkeys[hk]];
+}
+
+static bool pad_held(int b)
+{
+    for (int i = 0; i < MAX_PADS; i++)
+        if (pads[i] && pad_pressed(pads[i], b)) return true;
+    return false;
+}
+
 static void set_volume(int v)
 {
     volume = v < 0 ? 0 : v > 100 ? 100 : v;
     muted = false;
     osd_message("Volume %d%%", volume);
 }
+
+static void stop_audio(void) { if (adev) SDL_ClearQueuedAudio(adev); }
+
+/* ---------------------------------------------------------------- */
+/* Save states                                                      */
+/* ---------------------------------------------------------------- */
+
+static int slot(void) { return cfg.state_slot >= 1 && cfg.state_slot <= 9 ? cfg.state_slot : 1; }
+
+static void slot_path(char *buf, size_t n, int s)
+{
+    char dir[4096];
+    snprintf(dir, sizeof dir, "%sstates", base_dir());
+    make_dir(dir);
+    snprintf(buf, n, "%s/slot%d.ki2s", dir, s);
+}
+
+static void save_state(void)
+{
+    char path[4200];
+    slot_path(path, sizeof path, slot());
+    if (state_save_file(path)) osd_message("Saved state %d", slot());
+    else osd_message("Could not save state %d", slot());
+}
+
+static void load_state(void)
+{
+    char path[4200];
+    slot_path(path, sizeof path, slot());
+    FILE *f = fopen(path, "rb");
+    if (!f) { osd_message("State %d is empty", slot()); return; }
+    fclose(f);
+    if (!state_load_file(path)) { osd_message("State %d is from another version", slot()); return; }
+    ac.active = false;
+    if (frame_count < (uint64_t)cfg.boot_skip_frames) frame_count = (uint64_t)cfg.boot_skip_frames;
+    stop_audio();
+    osd_message("Loaded state %d", slot());
+}
+
+static void apply_rewind_setting(void)
+{
+    state_set_history(cfg.rewind ? (size_t)(cfg.rewind_mb > 8 ? cfg.rewind_mb : 8) << 20 : 0);
+}
+
+/* ---------------------------------------------------------------- */
+/* Menu                                                             */
+/* ---------------------------------------------------------------- */
+
+enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_RUNAHEAD, M_REWIND, M_FULLSCREEN, M_SCALE, M_SMOOTH,
+       M_PACING, M_VOLUME, M_AUTOCOIN, M_RESET, M_QUIT, M_COUNT };
+
+static bool menu_open, menu_changed, quit_requested;
+static int menu_sel;
+
+static void draw_menu(uint32_t *out)
+{
+    if (!menu_open) return;
+    static const char *const scale_names[] = { "Fit", "Integer", "Stretch" };
+    static const char *const pacing_names[] = { "Auto", "Audio", "Vsync" };
+    static const char *const ra_names[] = { "Off", "1 frame", "2 frames" };
+    char b[M_COUNT][64];
+    const char *items[M_COUNT];
+    int ra = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
+    snprintf(b[M_RESUME], 64, "Resume");
+    snprintf(b[M_SAVE], 64, "Save state\tslot %d", slot());
+    snprintf(b[M_LOAD], 64, "Load state\tslot %d", slot());
+    snprintf(b[M_SLOT], 64, "State slot\t< %d >", slot());
+    snprintf(b[M_RUNAHEAD], 64, "Run-ahead (less lag)\t%s", ra_names[ra]);
+    snprintf(b[M_REWIND], 64, "Rewind\t%s", cfg.rewind ? "On" : "Off");
+    snprintf(b[M_FULLSCREEN], 64, "Fullscreen\t%s", fullscreen ? "On" : "Off");
+    snprintf(b[M_SCALE], 64, "Scaling\t%s", scale_names[cfg.scale_mode]);
+    snprintf(b[M_SMOOTH], 64, "Smoothing\t%s", cfg.smooth ? "On" : "Off");
+    snprintf(b[M_PACING], 64, "Frame pacing\t%s%s", pacing_names[cfg.pacing],
+             cfg.pacing == PACING_AUTO ? (vsync ? " (vsync)" : " (audio)") : "");
+    snprintf(b[M_VOLUME], 64, "Volume\t%s", muted ? "Muted" : "");
+    if (!muted) snprintf(b[M_VOLUME], 64, "Volume\t%d%%", volume);
+    snprintf(b[M_AUTOCOIN], 64, "Auto-coin\t%s", cfg.auto_coin ? "On" : "Off");
+    snprintf(b[M_RESET], 64, "Reset game");
+    snprintf(b[M_QUIT], 64, "Quit");
+    for (int i = 0; i < M_COUNT; i++) items[i] = b[i];
+    osd_menu(out, "KILLER INSTINCT 2", items, M_COUNT, menu_sel, "ENTER/A SELECT   ESC/B CLOSE");
+}
+
+static void menu_close(void)
+{
+    menu_open = false;
+    if (menu_changed) {
+        cfg.volume = volume;
+        cfg.fullscreen = fullscreen;
+        if (config_save()) osd_message("Settings saved");
+        menu_changed = false;
+    }
+}
+
+static void cycle(int *v, int n, int dir) { *v = ((*v + dir) % n + n) % n; }
+
+// Left/right on the selected item (dir = -1/+1), or Enter (dir = 0).
+static void menu_change(int dir)
+{
+    int d = dir ? dir : 1;
+    switch (menu_sel) {
+    case M_RESUME: if (!dir) menu_close(); return;
+    case M_SAVE: if (!dir) { save_state(); menu_close(); } return;
+    case M_LOAD: if (!dir) { load_state(); menu_close(); } return;
+    case M_SLOT: { int s = slot() - 1; cycle(&s, 9, d); cfg.state_slot = s + 1; break; }
+    case M_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
+    case M_REWIND: cfg.rewind = !cfg.rewind; apply_rewind_setting(); break;
+    case M_FULLSCREEN: set_fullscreen(!fullscreen); break;
+    case M_SCALE: cycle(&cfg.scale_mode, 3, d); apply_scaling(); break;
+    case M_SMOOTH: cfg.smooth = !cfg.smooth; apply_scaling(); break;
+    case M_PACING: cycle(&cfg.pacing, 3, d); choose_pacing(); break;
+    case M_VOLUME:
+        if (!dir) muted = !muted;
+        else { volume = volume + 10 * dir; volume = volume < 0 ? 0 : volume > 100 ? 100 : volume; muted = false; }
+        break;
+    case M_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
+    case M_RESET:
+        if (dir) return;
+        machine_reset();
+        apply_rewind_setting();
+        ac.active = false;
+        frame_count = 0;
+        stop_audio();
+        menu_close();
+        osd_message("Reset");
+        return;
+    case M_QUIT: if (!dir) quit_requested = true; return;
+    }
+    menu_changed = true;
+}
+
+static void menu_toggle(void)
+{
+    if (menu_open) menu_close();
+    else { menu_open = true; stop_audio(); }
+}
+
+static void menu_nav(int up_down, int left_right, bool enter, bool back)
+{
+    if (up_down) cycle(&menu_sel, M_COUNT, up_down);
+    if (left_right) menu_change(left_right);
+    if (enter) menu_change(0);
+    if (back) menu_close();
+}
+
+/* ---------------------------------------------------------------- */
+/* Events                                                           */
+/* ---------------------------------------------------------------- */
 
 /* returns false to quit */
 static bool handle_events(void)
@@ -276,20 +441,36 @@ static bool handle_events(void)
         case SDL_WINDOWEVENT:
             if (ev.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED || ev.window.event == SDL_WINDOWEVENT_MOVED) choose_pacing();
             break;
+        case SDL_CONTROLLERBUTTONDOWN: {
+            int b = ev.cbutton.button;
+            SDL_GameController *c = SDL_GameControllerFromInstanceID(ev.cbutton.which);
+            bool combo = c && ((b == SDL_CONTROLLER_BUTTON_START && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_BACK)) ||
+                               (b == SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_START)));
+            if ((cfg.pad_menu != PAD_NONE && b == cfg.pad_menu) || combo) { menu_toggle(); break; }
+            if (!menu_open) break;
+            menu_nav(b == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : b == SDL_CONTROLLER_BUTTON_DPAD_DOWN ? 1 : 0,
+                     b == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT ? 1 : 0,
+                     b == SDL_CONTROLLER_BUTTON_A, b == SDL_CONTROLLER_BUTTON_B || b == SDL_CONTROLLER_BUTTON_START);
+            break;
+        }
         case SDL_KEYDOWN: {
             SDL_Scancode sc = ev.key.keysym.scancode;
-            if (sc == SDL_SCANCODE_ESCAPE) {
-                if (fullscreen) set_fullscreen(false);
-                else return false;
+            bool alt_enter = sc == SDL_SCANCODE_RETURN && (ev.key.keysym.mod & KMOD_ALT);
+            if (sc == SDL_SCANCODE_ESCAPE || is_hotkey(sc, HK_MENU)) { if (!ev.key.repeat) menu_toggle(); break; }
+            if (menu_open && !alt_enter) {
+                menu_nav(sc == SDL_SCANCODE_UP ? -1 : sc == SDL_SCANCODE_DOWN ? 1 : 0,
+                         sc == SDL_SCANCODE_LEFT ? -1 : sc == SDL_SCANCODE_RIGHT ? 1 : 0,
+                         !ev.key.repeat && (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE || sc == SDL_SCANCODE_KP_ENTER),
+                         sc == SDL_SCANCODE_BACKSPACE);
+                break;
             }
             if (ev.key.repeat && !is_hotkey(sc, HK_VOL_UP) && !is_hotkey(sc, HK_VOL_DOWN) && !is_hotkey(sc, HK_STEP)) break;
-            if ((sc == SDL_SCANCODE_RETURN && (ev.key.keysym.mod & KMOD_ALT)) || is_hotkey(sc, HK_FULLSCREEN))
-                set_fullscreen(!fullscreen);
-            else if (is_hotkey(sc, HK_PAUSE)) {
-                paused = !paused;
-                if (paused && adev) SDL_ClearQueuedAudio(adev);
-            }
-            else if (is_hotkey(sc, HK_STEP)) { if (paused) step_once = true; else { paused = true; if (adev) SDL_ClearQueuedAudio(adev); } }
+            if (alt_enter || is_hotkey(sc, HK_FULLSCREEN)) { set_fullscreen(!fullscreen); if (menu_open) menu_changed = true; }
+            else if (is_hotkey(sc, HK_PAUSE)) { paused = !paused; if (paused) stop_audio(); }
+            else if (is_hotkey(sc, HK_STEP)) { if (paused) step_once = true; else { paused = true; stop_audio(); } }
+            else if (is_hotkey(sc, HK_SAVE_STATE)) save_state();
+            else if (is_hotkey(sc, HK_LOAD_STATE)) load_state();
+            else if (is_hotkey(sc, HK_NEXT_SLOT)) { cfg.state_slot = slot() % 9 + 1; osd_message("State slot %d", slot()); }
             else if (is_hotkey(sc, HK_SCREENSHOT)) screenshot();
             else if (is_hotkey(sc, HK_VOL_UP)) set_volume(volume + 10);
             else if (is_hotkey(sc, HK_VOL_DOWN)) set_volume(volume - 10);
@@ -298,9 +479,11 @@ static bool handle_events(void)
         }
         }
     }
-    return true;
+    return !quit_requested;
 }
 
+// One real frame of the game: inputs, emulation, and a checkpoint for
+// rollback/rewind. Every emulated frame must end in a checkpoint.
 static void emulate_frame(void)
 {
     uint32_t held[2];
@@ -308,7 +491,18 @@ static void emulate_frame(void)
     auto_coin(held);
     set_ports(held);
     run_frame();
+    state_checkpoint();
     frame_count++;
+}
+
+// Show the frame `run_ahead` frames in the future (same inputs), then
+// return to the real one: the game's own input lag disappears from view.
+static void present_ahead(int n)
+{
+    if (n <= 0) { present(NULL); return; }
+    for (int k = 0; k < n; k++) { run_frame(); pump_audio(true, 1); }
+    present(NULL);
+    state_rollback();
 }
 
 /* ---------------------------------------------------------------- */
@@ -334,6 +528,7 @@ int frontend_main(void)
     apply_scaling();
     if (cfg.fullscreen) set_fullscreen(true);
     choose_pacing();
+    apply_rewind_setting();
 
     SDL_AudioSpec want = { .freq = AUDIO_HZ, .format = AUDIO_S16SYS, .channels = 1, .samples = 512 }, have;
     adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
@@ -345,11 +540,12 @@ int frontend_main(void)
     uint64_t freq = SDL_GetPerformanceFrequency();
     uint64_t next = SDL_GetPerformanceCounter();
     while (handle_events()) {
-        const uint8_t *ks = SDL_GetKeyboardState(NULL);
-        bool fast = (cfg.hotkeys[HK_FAST] && ks[cfg.hotkeys[HK_FAST]]) || frame_count < (uint64_t)cfg.boot_skip_frames;
+        bool booting = frame_count < (uint64_t)cfg.boot_skip_frames;
+        bool fast = key_held(HK_FAST) || pad_held(cfg.pad_fast) || booting;
+        bool rewinding = cfg.rewind && (key_held(HK_REWIND) || pad_held(cfg.pad_rewind));
 
-        if (paused && !step_once) {
-            present("PAUSED");
+        if (menu_open || (paused && !step_once)) {
+            present(menu_open ? NULL : "PAUSED");
             if (!vsync) SDL_Delay(16);
             next = SDL_GetPerformanceCounter();
             continue;
@@ -361,6 +557,15 @@ int frontend_main(void)
             present("PAUSED");
             continue;
         }
+        if (rewinding && !booting) {
+            // one checkpoint back per display frame: rewinds at normal speed
+            bool more = state_rewind();
+            stop_audio();
+            present(more ? "<< REWIND" : "REWIND: NO MORE HISTORY");
+            if (!vsync) SDL_Delay((uint32_t)(1000 / FRAME_HZ));
+            next = SDL_GetPerformanceCounter();
+            continue;
+        }
 
         if (fast) {
             // run unthrottled (or up to the speed limit) for one display frame, silently
@@ -370,8 +575,8 @@ int frontend_main(void)
                 emulate_frame();
                 pump_audio(true, 1);
             }
-            if (adev) SDL_ClearQueuedAudio(adev);
-            present(frame_count < (uint64_t)cfg.boot_skip_frames ? "" : ">> FAST");
+            stop_audio();
+            present(booting ? "" : ">> FAST");
             if (!vsync) {
                 uint64_t now = SDL_GetPerformanceCounter();
                 if (now - start < budget) SDL_Delay((uint32_t)((budget - (now - start)) * 1000 / freq));
@@ -381,6 +586,7 @@ int frontend_main(void)
         }
 
         emulate_frame();
+        int ahead = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
         if (vsync) {
             // one game frame per refresh; nudge the resampling so the audio
             // queue stays near its target instead of slowly over- or underflowing
@@ -395,10 +601,10 @@ int frontend_main(void)
             if (err > 1) err = 1;
             if (err < -1) err = -1;
             pump_audio(false, display_hz / FRAME_HZ * (1 + 0.005 * err));
-            present(NULL);
+            present_ahead(ahead);
         } else {
             pump_audio(false, 1);
-            present(NULL);
+            present_ahead(ahead);
             if (adev) {
                 // the audio device is the clock: keep `latency` ms queued, run ahead otherwise
                 while (queued_ms() > latency) SDL_Delay(1);
@@ -410,6 +616,7 @@ int frontend_main(void)
             }
         }
     }
+    if (menu_changed) menu_close();
     SDL_Quit();
     return 0;
 }

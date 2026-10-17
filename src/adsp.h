@@ -3,6 +3,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 enum { ADSP_IRQ0 = 0, ADSP_IRQ1 = 1, ADSP_IRQ2 = 2, ADSP_TIMER = 5 };
 
@@ -24,3 +25,4 @@ void adsp_set_irq(int line, bool state);
 void adsp_pulse_irq(int line);
 uint32_t *adsp_internal_pm(void);   // 1K x 24-bit, filled by the boot loader
 uint16_t adsp_pc(void);
+size_t adsp_state(uint8_t *buf, bool load);    // NULL buf: size only
