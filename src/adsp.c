@@ -939,11 +939,30 @@ static void exec(uint32_t op)
     }
 }
 
+static inline bool any_irq(void)
+{
+    uint32_t v = 0;
+    for (int i = 0; i < 6; i++) v |= a.irq_state[i] | a.irq_latch[i];
+    return v != 0;
+}
+
 void adsp_run(int cycles)
 {
-    for (int n = 0; n < cycles; n++) {
-        check_irqs();
-        if (a.idle) { timer_tick(1); tx_tick(1); continue; }
+    while (cycles > 0) {
+        if (any_irq()) check_irqs();
+        if (a.idle) {
+            // fast-forward to the next autobuffer sample (or the end of the slice)
+            int step = cycles;
+            if (a.tx_on) {
+                int to_next = a.tx_period - a.tx_cnt;
+                if (to_next < step) step = to_next < 1 ? 1 : to_next;
+            }
+            if ((a.mstat & M_TIMER) && step > 1) step = 1 + (step > 64 ? 63 : step - 1);
+            timer_tick(step);
+            tx_tick(step);
+            cycles -= step;
+            continue;
+        }
 
         uint32_t op = pm_read(a.pc);
         if (a.pc != a.loop_end) a.pc++;
@@ -952,8 +971,9 @@ void adsp_run(int cycles)
         a.pc &= 0x3fff;
 
         exec(op);
-        timer_tick(1);
-        tx_tick(1);
+        if (a.mstat & M_TIMER) timer_tick(1);
+        if (a.tx_on && ++a.tx_cnt >= a.tx_period) { a.tx_cnt--; tx_tick(1); }
+        cycles--;
     }
 }
 

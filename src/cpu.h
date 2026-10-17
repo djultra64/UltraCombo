@@ -55,6 +55,11 @@ void cpu_reset(void);
 // Run until at least `n` instructions have executed. Returns instructions run.
 uint64_t cpu_run(uint64_t n);
 void cpu_set_irq(int line, bool state);
+// Advance time without executing (used to skip recognised idle loops).
+void cpu_skip(uint64_t n);
+// Set when the CPU is spinning on an interrupt line that only changes on a
+// scanline boundary; cpu_run returns early and the caller may skip ahead.
+extern bool cpu_idle;
 void cpu_exception(int code, uint32_t badvaddr, bool has_badvaddr);
 
 // Debug hooks

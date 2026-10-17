@@ -9,6 +9,34 @@
 
 cpu_t cpu;
 bool cpu_trace;
+bool cpu_idle;
+
+// Recognise "1: mfc0 rX,Cause; nop; andi rX,rX,IPmask; beq/bne rX,zero,1b; nop"
+// i.e. polling an external interrupt line without doing anything else.
+static bool is_irq_poll_loop(uint32_t pc, uint32_t op)
+{
+    static uint32_t yes[16], no[64];
+    static int nyes, nno;
+    for (int i = 0; i < nyes; i++) if (yes[i] == pc) return true;
+    for (int i = 0; i < nno; i++) if (no[i] == pc) return false;
+
+    bool match = false;
+    uint8_t *p = mem_ptr(pc & 0x1fffffffu);
+    if (p && (pc & 0xe0000000u) == 0x80000000u) {
+        uint32_t w[5];
+        memcpy(w, p, sizeof w);
+        int rt = (op >> 16) & 31;
+        match = w[1] == 0 &&
+                (w[2] >> 26) == 0x0c && ((w[2] >> 21) & 31) == rt && ((w[2] >> 16) & 31) == rt &&
+                (w[2] & 0xffff) && !(w[2] & 0x80ff) &&                       // IP2..IP6 only
+                ((w[3] >> 26) == 0x04 || (w[3] >> 26) == 0x05) &&
+                ((w[3] >> 21) & 31) == rt && ((w[3] >> 16) & 31) == 0 &&
+                (int16_t)w[3] == -4 && w[4] == 0;
+    }
+    if (match) { if (nyes < 16) yes[nyes++] = pc; }
+    else { no[nno % 64] = pc; nno++; }
+    return match;
+}
 
 #define RS ((op >> 21) & 31)
 #define RT ((op >> 16) & 31)
@@ -263,7 +291,10 @@ static void exec_cop0(uint32_t op)
         return;
     }
     switch (RS) {
-    case 0x00: WR(RT, SX32(cp0_read(RD))); break;            // MFC0
+    case 0x00:                                                // MFC0
+        if (RD == CP0_CAUSE && !cpu.in_delay && is_irq_poll_loop(cpu.cur_pc, op)) cpu_idle = true;
+        WR(RT, SX32(cp0_read(RD)));
+        break;
     case 0x01: WR(RT, cp0_read(RD)); break;                   // DMFC0
     case 0x04: cp0_write(RD, SX32(R(RT))); break;             // MTC0
     case 0x05: cp0_write(RD, R(RT)); break;                   // DMTC0
@@ -729,11 +760,23 @@ void cpu_reset(void)
     cpu.cp0[CP0_WIRED] = 0;
 }
 
+void cpu_skip(uint64_t n)
+{
+    uint32_t count = (uint32_t)cpu.cp0[CP0_COUNT];
+    uint32_t ticks = (uint32_t)((cpu.count_frac + n) / 2 - cpu.count_frac / 2);
+    uint32_t to_compare = (uint32_t)cpu.cp0[CP0_COMPARE] - count;
+    if (to_compare != 0 && to_compare <= ticks) cpu.cp0[CP0_CAUSE] |= 0x8000;
+    cpu.cp0[CP0_COUNT] = count + ticks;
+    cpu.count_frac += (uint32_t)n;
+    cpu.cycles += n;
+}
+
 uint64_t cpu_run(uint64_t n)
 {
     uint64_t start = cpu.cycles;
     uint64_t end = start + n;
-    while (cpu.cycles < end) {
+    cpu_idle = false;
+    while (cpu.cycles < end && !cpu_idle) {
         cpu.cur_pc = cpu.pc;
         cpu.in_delay = cpu.next_delay;
         exc_raised = false;

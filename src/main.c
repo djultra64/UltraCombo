@@ -43,7 +43,12 @@ static void run_frame(void)
         int remaining = CYCLES_PER_LINE;
         while (remaining > 0) {
             int slice = remaining < 256 ? remaining : 256;
-            cpu_run((uint64_t)slice);
+            int ran = (int)cpu_run((uint64_t)slice);
+            if (cpu_idle) {
+                // spinning on an interrupt line: nothing changes until the next scanline
+                cpu_skip((uint64_t)(remaining - ran));
+                slice = remaining;
+            }
             ide_tick(slice);
             // DCS runs at 10 MHz against the 100 MHz R4600
             static int sound_acc;
@@ -141,7 +146,7 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     const char *rom_path = "ki2-l14.u98", *disk_path = "kinst2.raw", *sound_dir = ".";
-    int headless = 0, shot_every = 0, dis_count = 0;
+    int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     uint32_t dis_addr = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_path = argv[++i];
@@ -150,6 +155,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--headless") && i + 1 < argc) headless = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--trace")) cpu_trace = true;
+        else if (!strcmp(argv[i], "--trace-from") && i + 1 < argc) trace_from = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dis") && i + 2 < argc) { dis_addr = (uint32_t)strtoul(argv[++i], 0, 16); dis_count = atoi(argv[++i]); }
         else { usage(); return 1; }
     }
@@ -189,7 +195,12 @@ int main(int argc, char **argv)
         uint32_t wav_samples = 0;
         if (wav) fseek(wav, 44, SEEK_SET);
         for (int f = 1; f <= headless; f++) {
+            if (trace_from && f == trace_from) cpu_trace = true;
             run_frame();
+            if (getenv("KI2_DUMP_AT") && f == atoi(getenv("KI2_DUMP_AT"))) {
+                FILE *o = fopen("ram0.bin", "wb"); fwrite(ram0, 1, RAM0_SIZE, o); fclose(o);
+                o = fopen("ram2.bin", "wb"); fwrite(ram2, 1, RAM2_SIZE, o); fclose(o);
+            }
             if (wav) {
                 int16_t buf[4096]; int n;
                 while ((n = sound_fetch(buf, 4096)) > 0) { fwrite(buf, 2, (size_t)n, wav); wav_samples += (uint32_t)n; }
