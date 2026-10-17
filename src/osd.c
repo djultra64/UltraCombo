@@ -83,16 +83,27 @@ void osd_draw(uint32_t *px, const char *status)
 
 // A centred panel: title, then one row per item with the selected one highlighted.
 // Each item is "label\tvalue" (value optional).
+#define MENU_ROWS 18
+
 void osd_menu(uint32_t *px, const char *title, const char *const *items, int n, int sel, const char *footer)
 {
-    int w = 220, row = 10, h = 22 + n * row + (footer ? 14 : 0);
+    // long pages scroll to keep the selection in view
+    static int first;
+    int rows = n < MENU_ROWS ? n : MENU_ROWS;
+    if (sel < first) first = sel;
+    if (sel >= first + rows) first = sel - rows + 1;
+    if (first > n - rows) first = n - rows;
+    if (first < 0) first = 0;
+    int w = 280, row = 10, h = 22 + rows * row + (footer ? 14 : 0);
     int x0 = (320 - w) / 2, y0 = (240 - h) / 2;
     fill(px, 0, 0, 320, 240, 0x90000000u);           // dim the game
     fill(px, x0, y0, w, h, 0xffc08020u);
     fill(px, x0 + 1, y0 + 1, w - 2, h - 2, 0xf0101018u);
     draw_text(px, x0 + (w - (int)strlen(title) * 6) / 2, y0 + 5, title, 0xffc040);
-    for (int i = 0; i < n; i++) {
-        int y = y0 + 18 + i * row;
+    if (first > 0) draw_text(px, x0 + w - 10, y0 + 5, "^", 0xffc040);
+    if (first + rows < n) draw_text(px, x0 + w - 10, y0 + 18 + rows * row - 2, "v", 0xffc040);
+    for (int i = first; i < first + rows; i++) {
+        int y = y0 + 18 + (i - first) * row;
         char label[64];
         const char *tab = strchr(items[i], '\t');
         size_t len = tab ? (size_t)(tab - items[i]) : strlen(items[i]);
@@ -102,8 +113,16 @@ void osd_menu(uint32_t *px, const char *title, const char *const *items, int n, 
         draw_text(px, x0 + 8, y, label, c);
         if (tab) {
             const char *v = tab + 1;
-            draw_text(px, x0 + w - 8 - (int)strlen(v) * 6, y, v, i == sel ? 0xffe080 : 0x80c0ff);
+            draw_text(px, x0 + w - 14 - (int)strlen(v) * 6, y, v, i == sel ? 0xffe080 : 0x80c0ff);
         }
     }
     if (footer) draw_text(px, x0 + (w - (int)strlen(footer) * 6) / 2, y0 + h - 11, footer, 0x808080);
+}
+
+const uint8_t *osd_glyph(char c)
+{
+    int i = (unsigned char)c;
+    if (i >= 'a' && i <= 'z') i -= 32;
+    if (i < 32 || i > 95) i = '?';
+    return font[i - 32];
 }

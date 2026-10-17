@@ -26,9 +26,14 @@ typedef struct {
     char rom[1024], disk[1024], sound[1024];
 
     bool fullscreen;
+    bool fullscreen_exclusive;   // change the display mode instead of a borderless desktop window
+    char fullscreen_mode[32];    // "1920x1080@60" for exclusive fullscreen; empty = desktop
     int  window_scale;
+    int  window_x, window_y, window_w, window_h;   // last windowed geometry (0 = default)
     int  scale_mode;
-    int  filter;               // FILTER_* (video.h)
+    int  filter;               // FILTER_* (video.h), used when no shader preset is set
+    char shader[1024];         // libretro .glslp preset, relative to the program folder
+    char shader_params[1024];  // "name=value;..." changed parameters of that preset
     int  pacing;
 
     int  volume;               // 0-100
@@ -55,6 +60,9 @@ typedef struct {
     SDL_Scancode hotkeys[NHOTKEYS];
     int  pad[NBUTTONS];        // same layout for both pads; PAD_* or SDL button
     int  pad_deadzone;         // 0-32767
+    bool socd;                 // left+right = neutral, up+down = up (keyboards, hitboxes)
+    bool rumble;
+    bool pause_unfocused, mute_unfocused;
     int  pad_menu, pad_rewind, pad_fast;   // gamepad hotkeys (PAD_NONE = unbound)
 } config_t;
 

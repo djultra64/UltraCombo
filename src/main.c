@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+#include "icon.h"
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -240,6 +242,34 @@ static int headless_netplay(int end, const char *host_port, const char *join, in
     }
 }
 
+// Missing game files: a dialog in windowed mode (Windows has no console), stderr otherwise.
+static int headless_mode;
+
+static void report(bool fatal, const char *fmt, ...)
+{
+    char msg[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "%s\n", msg);
+    if (!headless_mode)
+        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, "Killer Instinct 2", msg, NULL);
+}
+
+static const char *files_help(void)
+{
+    static char buf[1024];
+    snprintf(buf, sizeof buf,
+             "Put the game files in:\n    %srun\n(or set their paths in ki2.ini).\n\n"
+             "Needed:\n"
+             "  ki2-l14.u98  - boot ROM\n"
+             "  kinst2.raw  - hard disk, extracted from MAME's kinst2.chd with\n"
+             "      chdman extractraw -i kinst2.chd -o kinst2.raw\n"
+             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", base_dir());
+    return buf;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -300,6 +330,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--rewind-test") && i + 1 < argc) rewind_test = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--runahead") && i + 1 < argc) runahead = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--host")) { extern const char *opt_net_host; opt_net_host = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : ""; }
+        else if (!strcmp(argv[i], "--write-icon") && i + 1 < argc) return icon_write_ico(argv[++i]) ? 0 : 1;
+        else if (!strcmp(argv[i], "--test-shaders")) { extern bool opt_test_shaders; opt_test_shaders = true; }
         else if (!strcmp(argv[i], "--join") && i + 1 < argc) { extern const char *opt_net_join; opt_net_join = argv[++i]; }
         else if (!strcmp(argv[i], "--net-host") && i + 1 < argc) net_host = argv[++i];
         else if (!strcmp(argv[i], "--net-join") && i + 1 < argc) net_join = argv[++i];
@@ -311,10 +343,14 @@ int main(int argc, char **argv)
         else { usage(); return 1; }
     }
 
+    headless_mode = headless || dis_count;
     static char rom_buf[4096], disk_buf[4096];
     rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
     disk_path = find_data(disk_path, disk_buf, sizeof disk_buf);
-    if (!load_file(rom_path, rom, ROM_SIZE)) return 1;
+    if (!load_file(rom_path, rom, ROM_SIZE)) {
+        report(true, "Killer Instinct 2 can't start: the boot ROM %s was not found or is incomplete.\n\n%s", rom_path, files_help());
+        return 1;
+    }
     if (dis_count) {
         for (int i = 0; i < dis_count; i++) {
             uint32_t a = dis_addr + 4 * i, op;
@@ -330,7 +366,10 @@ int main(int argc, char **argv)
         return 0;
     }
     // KI2 drive geometry from the CHD metadata; serial lives at identify word 11
-    if (!ide_open(disk_path, 1463, 13, 47, 11)) return 1;
+    if (!ide_open(disk_path, 1463, 13, 47, 11)) {
+        report(true, "Killer Instinct 2 can't start: the disk image %s was not found.\n\n%s", disk_path, files_help());
+        return 1;
+    }
     static char snd_buf[4096];
     if (!strcmp(sound_dir, ".")) {
         // locate the sound ROMs the same way as the boot ROM
@@ -339,7 +378,8 @@ int main(int argc, char **argv)
         if (!slash) slash = strrchr(u10, '\\');
         if (slash) { memmove(snd_buf, u10, (size_t)(slash - u10)); snd_buf[slash - u10] = 0; sound_dir = snd_buf; }
     }
-    sound_init(sound_dir);
+    if (!sound_init(sound_dir))
+        report(false, "Some sound ROMs were not found in %s, so the game will run without sound.\n\n%s", sound_dir, files_help());
     hw.dsw = getenv("KI2_DSW") ? (uint32_t)strtoul(getenv("KI2_DSW"), 0, 16) : config_dsw();
     cpu_reset();
     rec_init();

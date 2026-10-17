@@ -91,3 +91,10 @@ const char *training_status(void)
     if (mode == DUMMY_PLAY) return cfg.training ? "TRAINING  DUMMY" : "DUMMY";
     return cfg.training ? "TRAINING" : NULL;
 }
+
+int game_health(int player)
+{
+    uint8_t h = ram2[HEALTH_P1 + (uint32_t)player * HEALTH_STEP];
+    bool fight = ram2[TIMER_ONES] <= 9 && ram2[TIMER_TENS] <= 9;
+    return fight && h <= HEALTH_MAX ? h : -1;
+}

@@ -76,17 +76,40 @@ The menu has save/load, run-ahead, rewind, training, input display, video,
 volume and auto-coin settings, Reset and Quit; changes are saved to
 `ki2.ini` when it closes.
 
-## Video filters
+## Graphics
 
-`filter` in `ki2.ini` (or Filter in the menu), drawn by the GPU:
+Menu → Graphics: fullscreen (borderless, or exclusive at a chosen display
+mode), window size, scaling (fit 4:3, integer, stretch), shader, shader
+parameters and frame pacing.
 
-- **sharp** — crisp pixels, evenly sized at any window size
-- **smooth** — sharpened bicubic; suits KI2's pre-rendered 3D art
-- **scanlines** — a CRT's horizontal lines without the rest
-- **crt** — scanlines, aperture-grille mask, slight curvature and vignette
-  (the mask needs at least 960 pixels of width)
+**Shaders** are drawn by the GPU. Four are built in:
+
+- **Sharp** — crisp pixels, evenly sized at any window size
+- **Smooth** — sharpened bicubic; suits KI2's pre-rendered 3D art
+- **Scanlines**, **CRT** — simple, fast CRT looks
+
+Any **libretro GLSL preset** (`.glslp`, the format of RetroArch's shader
+collection) under `shaders/` works too, multi-pass presets, lookup
+textures and all. Bundled: crt-lottes, crt-hyllian, crt-nobody, crt-1tap/2tap,
+ScaleFX and xBR. `make shaders-extra` adds xBRZ, crt-guest-dr-venom,
+crt-royale, crt-geom, crt-easymode, zfast-crt and crt-aperture (GPL
+licensed, kept as separate files in `shaders/extra/`). Each preset's
+`#pragma parameter` settings can be adjusted live in Shader parameters, and
+are remembered. `ki2 --test-shaders` checks that every preset compiles.
 
 Without OpenGL the game falls back to plain SDL drawing (sharp or smooth).
+
+## Controls page
+
+Menu → Controls rebinds both players' keys, the gamepad buttons and all
+hotkeys (select one, press the new key or button; Backspace unbinds).
+Also there: **left+right = neutral** (SOCD cleaning, on by default: left and
+right together count as neither, up and down together as up, like fight
+sticks), **rumble** when your character is hit, and the stick deadzone.
+
+Game & system has volume, mute/pause while the window is in the background,
+the DIP switch settings, auto-coin, run-ahead and rewind. The window's size
+and position are remembered between runs.
 
 ## Training mode
 

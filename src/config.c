@@ -43,13 +43,14 @@ static const char *const hotkey_defaults[NHOTKEYS] = {
     "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown", "F3", "F4", "F8", "F9",
 };
 
-#define MAX_OPTS 96
+#define MAX_OPTS 256
 static opt_t opts[MAX_OPTS];
 static int nopts;
 static char key_names[2][NBUTTONS][24], pad_keys[NBUTTONS][24], hk_keys[NHOTKEYS][24];
 
 static void add(const char *sec, const char *key, type_t t, void *p, const char *def, const char *help, const char *const *names)
 {
+    if (nopts == MAX_OPTS) { fprintf(stderr, "config: too many settings, %s ignored\n", key); return; }
     opts[nopts++] = (opt_t){ sec, key, t, p, def, help, names };
 }
 
@@ -61,8 +62,16 @@ static void build_table(void)
     add("paths", "sound", T_STR, cfg.sound, "", "directory with ki2_l1.u10..u36; empty = beside the ROM", 0);
 
     add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "no", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
+    add("video", "fullscreen_exclusive", T_BOOL, &cfg.fullscreen_exclusive, "no", "exclusive fullscreen (sets the display mode) instead of borderless", 0);
+    add("video", "fullscreen_mode", T_STR, cfg.fullscreen_mode, "", "display mode for exclusive fullscreen, e.g. 1920x1080@60; empty = current", 0);
     add("video", "window_scale", T_INT, &cfg.window_scale, "3", "initial window size as a multiple of 320x240", 0);
+    add("video", "window_x", T_INT, &cfg.window_x, "0", "last window position and size (remembered on exit)", 0);
+    add("video", "window_y", T_INT, &cfg.window_y, "0", 0, 0);
+    add("video", "window_w", T_INT, &cfg.window_w, "0", 0, 0);
+    add("video", "window_h", T_INT, &cfg.window_h, "0", 0, 0);
     add("video", "scale", T_ENUM, &cfg.scale_mode, "fit", "fit (largest 4:3), integer (sharpest, may border), stretch", scale_names);
+    add("video", "shader", T_STR, cfg.shader, "", "a libretro .glslp preset under shaders/ (overrides filter), e.g. shaders/crt/crt-lottes.glslp", 0);
+    add("video", "shader_params", T_STR, cfg.shader_params, "", "adjusted shader parameters (set from the menu)", 0);
     add("video", "filter", T_ENUM, &cfg.filter, "sharp",
         "sharp (crisp pixels), smooth (sharpened bicubic), scanlines, crt (scanlines, mask, curvature)", filter_names);
     add("video", "pacing", T_ENUM, &cfg.pacing, "auto",
@@ -72,6 +81,8 @@ static void build_table(void)
     add("audio", "volume", T_INT, &cfg.volume, "100", "0-100", 0);
     add("audio", "latency_ms", T_INT, &cfg.audio_latency_ms, "70", "audio buffer; lower = less delay, more risk of crackle", 0);
 
+    add("system", "pause_unfocused", T_BOOL, &cfg.pause_unfocused, "no", "pause while the window is in the background", 0);
+    add("system", "mute_unfocused", T_BOOL, &cfg.mute_unfocused, "no", "mute while the window is in the background", 0);
     add("system", "boot_skip_frames", T_INT, &cfg.boot_skip_frames, "90",
         "fast-forward this many frames at startup (90 = blank boot screens, 1000 = to the K2 logo)", 0);
     add("system", "auto_coin", T_BOOL, &cfg.auto_coin, "yes", "Start inserts coins when there are not enough credits", 0);
@@ -101,6 +112,7 @@ static void build_table(void)
             add("keyboard", names[p][b], T_KEY, &cfg.keys[p][b], key_names[p][b],
                 p == 0 && b == 0 ? "SDL key names, e.g. A, Left Shift, Keypad 4, Space; empty = unbound" : 0, 0);
         }
+    add("keyboard", "socd_cleaning", T_BOOL, &cfg.socd, "yes", "left+right together = neutral, up+down = up (as on fight sticks and hitboxes)", 0);
     for (int h = 0; h < NHOTKEYS; h++) {
         snprintf(hk_keys[h], 24, "%s", hotkey_defaults[h]);
         add("hotkeys", hotkey_names[h], T_KEY, &cfg.hotkeys[h], hk_keys[h],
@@ -115,6 +127,7 @@ static void build_table(void)
                      " dpleft dpright leftstick rightstick; first pad = player 1, second = player 2" : 0, 0);
     }
     add("gamepad", "deadzone", T_INT, &cfg.pad_deadzone, "16000", "left stick deadzone, 0-32767", 0);
+    add("gamepad", "rumble", T_BOOL, &cfg.rumble, "yes", "vibrate when your character is hit", 0);
     add("gamepad", "menu", T_PAD, &cfg.pad_menu, "guide", "hotkeys on the pad (Back+Start also opens the menu)", 0);
     add("gamepad", "rewind", T_PAD, &cfg.pad_rewind, "", "hold to rewind, e.g. leftshoulder", 0);
     add("gamepad", "fast_forward", T_PAD, &cfg.pad_fast, "", "hold to fast-forward, e.g. lefttrigger", 0);

@@ -3,7 +3,8 @@
 // nothing links against libGL directly.
 #include "video.h"
 #include "config.h"
-#include <SDL2/SDL_opengl.h>
+#include "gl_funcs.h"
+#include "shaders.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -47,42 +48,8 @@ static void sdl_present(const uint32_t *game, const uint32_t *overlay, int filte
 /* OpenGL                                                           */
 /* ---------------------------------------------------------------- */
 
-#define GL_FUNCS(X) \
-    X(void, glGenTextures, (GLsizei, GLuint *)) \
-    X(void, glBindTexture, (GLenum, GLuint)) \
-    X(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *)) \
-    X(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *)) \
-    X(void, glTexParameteri, (GLenum, GLenum, GLint)) \
-    X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
-    X(void, glClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) \
-    X(void, glClear, (GLbitfield)) \
-    X(void, glEnable, (GLenum)) \
-    X(void, glDisable, (GLenum)) \
-    X(void, glBlendFunc, (GLenum, GLenum)) \
-    X(void, glDrawArrays, (GLenum, GLint, GLsizei)) \
-    X(void, glPixelStorei, (GLenum, GLint)) \
-    X(GLuint, glCreateShader, (GLenum)) \
-    X(void, glShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
-    X(void, glCompileShader, (GLuint)) \
-    X(void, glGetShaderiv, (GLuint, GLenum, GLint *)) \
-    X(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(void, glDeleteShader, (GLuint)) \
-    X(GLuint, glCreateProgram, (void)) \
-    X(void, glAttachShader, (GLuint, GLuint)) \
-    X(void, glBindAttribLocation, (GLuint, GLuint, const GLchar *)) \
-    X(void, glLinkProgram, (GLuint)) \
-    X(void, glGetProgramiv, (GLuint, GLenum, GLint *)) \
-    X(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(void, glUseProgram, (GLuint)) \
-    X(GLint, glGetUniformLocation, (GLuint, const GLchar *)) \
-    X(void, glUniform1i, (GLint, GLint)) \
-    X(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
-    X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *)) \
-    X(void, glEnableVertexAttribArray, (GLuint)) \
-    X(void, glActiveTexture, (GLenum))
-
-#define DECLARE(ret, name, args) static ret (APIENTRY *p_##name) args;
-GL_FUNCS(DECLARE)
+#define GL_DEFINE(ret, name, args) ret (APIENTRY *p_##name) args;
+GL_FUNCS(GL_DEFINE)
 
 static SDL_GLContext ctx;
 static GLuint tex_game, tex_over;
@@ -281,6 +248,14 @@ static void gl_present(const uint32_t *game, const uint32_t *overlay, int filter
     p_glEnableVertexAttribArray(0);
     p_glActiveTexture(GL_TEXTURE0);
 
+    if (shader_active()) {
+        shader_render(game, v, h);
+        p_glViewport(v.x, h - v.y - v.h, v.w, v.h);
+        p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
+        p_glEnableVertexAttribArray(0);
+        p_glDisableVertexAttribArray(1);
+        goto overlay;
+    }
     if (filter < 0 || filter >= NFILTERS) filter = FILTER_SHARP;
     p_glBindTexture(GL_TEXTURE_2D, tex_game);
     if (last_filter < 0) {      // every filter does its own interpolation from bilinear taps
@@ -295,7 +270,9 @@ static void gl_present(const uint32_t *game, const uint32_t *overlay, int filter
     p_glDisable(GL_BLEND);
     p_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
+overlay:
     // overlay: on top, unfiltered, alpha-blended
+    p_glActiveTexture(GL_TEXTURE0);
     p_glBindTexture(GL_TEXTURE_2D, tex_over);
     p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 320, 240, GL_BGRA, GL_UNSIGNED_BYTE, overlay);
     p_glUseProgram(prog_over);
@@ -331,6 +308,15 @@ void video_present(const uint32_t *game, const uint32_t *overlay, int filter, in
 }
 
 const char *video_backend(void) { return use_gl ? "OpenGL" : "SDL renderer"; }
+
+bool video_set_shader(const char *path, char *err, size_t errlen)
+{
+    if (!use_gl) { snprintf(err, errlen, "shaders need OpenGL"); return false; }
+    if (!path || !*path) { shader_unload(); return true; }
+    return shader_load(path, err, errlen);
+}
+
+bool video_shaders_supported(void) { return use_gl; }
 
 void video_close(void)
 {

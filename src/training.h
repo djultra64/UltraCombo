@@ -12,3 +12,4 @@ void training_apply(bool real);
 void training_record_toggle(void);   // start/stop recording the dummy
 void training_play_toggle(void);
 const char *training_status(void);   // short label for the screen, or NULL
+int  game_health(int player);        // current health bar, 0-120, or -1 outside a fight

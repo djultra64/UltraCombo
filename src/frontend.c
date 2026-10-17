@@ -14,7 +14,9 @@
 #include "state.h"
 #include "netplay.h"
 #include "training.h"
+#include "icon.h"
 #include "video.h"
+#include "shaders.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +37,8 @@ static uint32_t px[320 * 240];     // game image
 static uint32_t ov[320 * 240];     // overlay: messages, menu, input display
 
 static bool paused, step_once, fullscreen, muted, vsync;
+static bool focused = true;
+static bool apply_shader(void);
 static int  volume;
 static double display_hz;
 static uint64_t frame_count;
@@ -54,7 +58,7 @@ static void pump_audio(bool discard, double speed)
     int n = sound_fetch(in, 8192);
     if (!adev || discard) return;
     double step = sound_rate() / AUDIO_HZ * speed;
-    int gain = muted ? 0 : volume * 256 / 100;
+    int gain = muted || (!focused && cfg.mute_unfocused) ? 0 : volume * 256 / 100;
     int m = 0;
     while (pos < n && m < 24576) {
         int i = (int)pos;
@@ -98,8 +102,19 @@ static void choose_pacing(void)
 static void set_fullscreen(bool on)
 {
     fullscreen = on;
-    SDL_SetWindowFullscreen(win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    if (on && cfg.fullscreen_exclusive) {
+        // exclusive: switch the display to the chosen mode (or keep the desktop's)
+        SDL_DisplayMode want = { 0 }, got;
+        int d = SDL_GetWindowDisplayIndex(win);
+        if (*cfg.fullscreen_mode && sscanf(cfg.fullscreen_mode, "%dx%d@%d", &want.w, &want.h, &want.refresh_rate) == 3 &&
+            SDL_GetClosestDisplayMode(d, &want, &got))
+            SDL_SetWindowDisplayMode(win, &got);
+        else if (SDL_GetDesktopDisplayMode(d, &got) == 0)
+            SDL_SetWindowDisplayMode(win, &got);
+        SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN);
+    } else SDL_SetWindowFullscreen(win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
     SDL_ShowCursor(on ? SDL_DISABLE : SDL_ENABLE);
+    choose_pacing();
 }
 
 static void draw_menu(uint32_t *ov);
@@ -193,6 +208,12 @@ static void read_players(uint32_t held[2])
         if (x < -cfg.pad_deadzone) held[p] |= 1u << BTN_LEFT;
         if (x > cfg.pad_deadzone) held[p] |= 1u << BTN_RIGHT;
     }
+    // SOCD cleaning: opposite directions together resolve the way fight sticks do
+    for (int p = 0; p < 2 && cfg.socd; p++) {
+        const uint32_t lr = 1u << BTN_LEFT | 1u << BTN_RIGHT, ud = 1u << BTN_UP | 1u << BTN_DOWN;
+        if ((held[p] & lr) == lr) held[p] &= ~lr;
+        if ((held[p] & ud) == ud) held[p] &= ~(1u << BTN_DOWN);
+    }
 }
 
 // Auto-coin: pressing Start without enough credits drops in the missing
@@ -240,6 +261,25 @@ static void auto_coin(uint32_t held[2])
         held[ac.player] |= 1u << BTN_START;
         ac.t++;
     } else ac.active = false;
+}
+
+// Rumble when a player's health drops. In netplay only your own player counts.
+static void rumble_check(void)
+{
+    static int last[2] = { -1, -1 };
+    for (int p = 0; p < 2; p++) {
+        int h = game_health(p);
+        int prev = last[p];
+        last[p] = h;
+        if (!cfg.rumble || h < 0 || prev < 0 || h >= prev) continue;
+        SDL_GameController *c = NULL;
+        if (netplay_running()) { if (p == netplay_local_player()) c = pads[0]; }
+        else c = pads[p];
+        if (!c) continue;
+        int d = prev - h > 40 ? 40 : prev - h;
+        uint16_t strength = (uint16_t)(0x5000 + d * 0x2a0);
+        SDL_GameControllerRumble(c, strength, (uint16_t)(strength / 2), (uint32_t)(90 + d * 6));
+    }
 }
 
 /* ---------------------------------------------------------------- */
@@ -372,87 +412,289 @@ static void apply_rewind_setting(void)
 /* Menu                                                             */
 /* ---------------------------------------------------------------- */
 
-enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_NETPLAY, M_RUNAHEAD, M_REWIND, M_TRAINING, M_INPUTS, M_FULLSCREEN,
-       M_SCALE, M_FILTER, M_PACING, M_VOLUME, M_FREEPLAY, M_BLOOD, M_AUTOCOIN, M_RESET, M_QUIT, M_COUNT };
+enum { PG_MAIN, PG_GRAPHICS, PG_PARAMS, PG_CONTROLS, PG_BIND, PG_GAME, PG_PRACTICE, PG_NETPLAY };
+
+// Main page
+enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
+// Graphics
+enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_BACK, G_COUNT };
+// Controls
+enum { C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_BACK, C_COUNT };
+// Game & system
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+// Practice
+enum { T_TRAINING, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
+// Netplay
 enum { N_HOST, N_JOIN, N_ADDRESS, N_PORT, N_DELAY, N_DISCONNECT, N_BACK, N_COUNT };
 
 static bool menu_open, menu_changed, quit_requested;
 static int menu_page, menu_sel;
 static int editing = -1;             // N_ADDRESS or N_PORT while typing into it
 static char edit_buf[256];
+static int bind_set;                 // PG_BIND: 0 P1 keys, 1 P2 keys, 2 pad buttons, 3 hotkeys, 4 pad hotkeys
+static int capturing = -1;           // row waiting for a key or button
 
 static bool in_netplay(void) { return netplay_running(); }
-
 static void not_in_netplay(void) { osd_message("Not available during netplay"); }
+
+static const char *const button_labels[NBUTTONS] = {
+    "Quick punch", "Medium punch", "Fierce punch", "Quick kick", "Medium kick", "Fierce kick",
+    "Up", "Down", "Left", "Right", "Start", "Coin",
+};
+static const char *const hotkey_labels[NHOTKEYS] = {
+    "Menu", "Pause", "Frame advance", "Fast-forward (hold)", "Rewind (hold)", "Save state", "Load state",
+    "Next state slot", "Fullscreen", "Screenshot", "Volume up", "Volume down", "Mute", "Test (operator)",
+    "Service credit", "Cabinet volume up", "Cabinet volume down", "Input display", "Training mode",
+    "Record dummy", "Play dummy",
+};
+static const char *const pad_hotkey_labels[3] = { "Menu", "Rewind (hold)", "Fast-forward (hold)" };
+
+/* --- shader list --- */
+
+#define MAX_SHADERS 256
+static char shader_names[MAX_SHADERS][192];
+static int nshaders = -1;
+
+static void scan_shaders(void)
+{
+    char dir[2048];
+    snprintf(dir, sizeof dir, "%sshaders", base_dir());
+    nshaders = shader_list(dir, shader_names, MAX_SHADERS);
+}
+
+// 0-3 built-in filters, 4+ presets
+static int shader_index(void)
+{
+    if (nshaders < 0) scan_shaders();
+    if (!*cfg.shader) return cfg.filter;
+    for (int i = 0; i < nshaders; i++) {
+        char p[256];
+        snprintf(p, sizeof p, "shaders/%s", shader_names[i]);
+        if (!strcmp(p, cfg.shader)) return NFILTERS + i;
+    }
+    return NFILTERS + nshaders;          // set in ki2.ini to something outside shaders/
+}
+
+static void shader_label(int idx, char *buf, size_t n)
+{
+    static const char *const builtin[NFILTERS] = { "Sharp", "Smooth", "Scanlines", "CRT" };
+    if (idx < NFILTERS) { snprintf(buf, n, "%s", builtin[idx]); return; }
+    if (idx - NFILTERS >= nshaders) { snprintf(buf, n, "(custom)"); return; }
+    const char *name = shader_names[idx - NFILTERS], *slash = strrchr(name, '/');
+    snprintf(buf, n, "%s", slash ? slash + 1 : name);
+    char *dot = strrchr(buf, '.');
+    if (dot) *dot = 0;
+}
+
+static void select_shader(int idx)
+{
+    if (!video_shaders_supported() && idx >= NFILTERS) { osd_message("Shaders need OpenGL"); return; }
+    if (idx < NFILTERS) { cfg.filter = idx; cfg.shader[0] = 0; }
+    else snprintf(cfg.shader, sizeof cfg.shader, "shaders/%s", shader_names[idx - NFILTERS]);
+    cfg.shader_params[0] = 0;
+    if (!apply_shader() && idx >= NFILTERS) cfg.shader[0] = 0;
+}
+
+/* --- display modes --- */
+
+static int display_modes(SDL_DisplayMode *out, int max)
+{
+    int d = SDL_GetWindowDisplayIndex(win), n = 0;
+    for (int i = 0; i < SDL_GetNumDisplayModes(d) && n < max; i++) {
+        SDL_DisplayMode m;
+        if (SDL_GetDisplayMode(d, i, &m) || m.w < 640) continue;
+        bool dup = false;
+        for (int k = 0; k < n; k++) if (out[k].w == m.w && out[k].h == m.h && out[k].refresh_rate == m.refresh_rate) dup = true;
+        if (!dup) out[n++] = m;
+    }
+    return n;
+}
+
+static void apply_fullscreen_mode(void)
+{
+    if (!fullscreen) return;
+    SDL_SetWindowFullscreen(win, 0);
+    set_fullscreen(true);
+}
+
+/* --- drawing --- */
+
+static int page_count(void)
+{
+    switch (menu_page) {
+    case PG_GRAPHICS: return G_COUNT;
+    case PG_PARAMS: return shader_param_count() + 2;
+    case PG_CONTROLS: return C_COUNT;
+    case PG_BIND: return (bind_set == 3 ? NHOTKEYS : bind_set == 4 ? 3 : NBUTTONS) + 1;
+    case PG_GAME: return S_COUNT;
+    case PG_PRACTICE: return T_COUNT;
+    case PG_NETPLAY: return N_COUNT;
+    default: return M_COUNT;
+    }
+}
+
+static const char *pad_label(int b)
+{
+    if (b == PAD_NONE) return "-";
+    if (b == PAD_LT) return "LT";
+    if (b == PAD_RT) return "RT";
+    static const char *const names[] = { "A", "B", "X", "Y", "Back", "Guide", "Start", "LS", "RS", "LB", "RB",
+                                         "Up", "Down", "Left", "Right" };
+    return b >= 0 && b < (int)(sizeof names / sizeof names[0]) ? names[b] : SDL_GameControllerGetStringForButton((SDL_GameControllerButton)b);
+}
 
 static void draw_menu(uint32_t *out)
 {
     if (!menu_open) return;
-    char b[M_COUNT][64];
-    const char *items[M_COUNT];
-    if (menu_page == 1) {
-        snprintf(b[N_HOST], 64, "Host a game\tport %d", cfg.net_port);
-        snprintf(b[N_JOIN], 64, "Join a game");
-        snprintf(b[N_ADDRESS], 64, "Address\t%s", editing == N_ADDRESS ? edit_buf : *cfg.net_address ? cfg.net_address : "(enter)");
-        if (editing == N_ADDRESS) strncat(b[N_ADDRESS], "_", 63 - strlen(b[N_ADDRESS]));
-        snprintf(b[N_PORT], 64, "Port\t%s", editing == N_PORT ? edit_buf : "");
-        if (editing == N_PORT) strncat(b[N_PORT], "_", 63 - strlen(b[N_PORT]));
-        else snprintf(b[N_PORT], 64, "Port\t%d", cfg.net_port);
-        snprintf(b[N_DELAY], 64, "Input delay\t< %d frames >", cfg.net_delay);
-        snprintf(b[N_DISCONNECT], 64, netplay_active() ? "Disconnect" : "(not connected)");
-        snprintf(b[N_BACK], 64, "Back");
-        for (int i = 0; i < N_COUNT; i++) items[i] = b[i];
-        const char *foot = editing >= 0 ? "TYPE, THEN ENTER   ESC CANCELS" :
-                           netplay_active() ? netplay_status() : "ENTER/A SELECT   ESC/B BACK";
-        osd_menu(out, "NETPLAY", items, N_COUNT, menu_sel, foot);
-        return;
+    static char b[96][72];
+    const char *items[96];
+    int n = page_count();
+    if (n > 96) n = 96;
+    const char *title = "KILLER INSTINCT 2", *foot = "ENTER/A SELECT   ESC/B BACK";
+    static const char *const onoff[2] = { "Off", "On" };
+    char lbl[80];
+
+    switch (menu_page) {
+    case PG_MAIN:
+        snprintf(b[M_RESUME], 72, "Resume");
+        snprintf(b[M_SAVE], 72, "Save state\tslot %d", slot());
+        snprintf(b[M_LOAD], 72, "Load state\tslot %d", slot());
+        snprintf(b[M_SLOT], 72, "State slot\t< %d >", slot());
+        snprintf(b[M_GRAPHICS], 72, "Graphics...");
+        snprintf(b[M_CONTROLS], 72, "Controls...");
+        snprintf(b[M_GAME], 72, "Game & system...");
+        snprintf(b[M_PRACTICE], 72, "Practice...\t%s", cfg.training ? "training on" : "");
+        snprintf(b[M_NETPLAY], 72, "Netplay...\t%s", in_netplay() ? "playing" : netplay_active() ? "connecting" : "");
+        snprintf(b[M_RESET], 72, "Reset game");
+        snprintf(b[M_QUIT], 72, "Quit");
+        foot = "ENTER/A SELECT   ESC/B CLOSE";
+        break;
+    case PG_GRAPHICS: {
+        static const char *const scale_names[] = { "Fit 4:3", "Integer", "Stretch" };
+        static const char *const pacing_names[] = { "Auto", "Audio", "Vsync" };
+        title = "GRAPHICS";
+        snprintf(b[G_FULLSCREEN], 72, "Fullscreen\t< %s >", !fullscreen ? "Off" : cfg.fullscreen_exclusive ? "Exclusive" : "Borderless");
+        snprintf(b[G_MODE], 72, "Exclusive mode\t< %s >", *cfg.fullscreen_mode ? cfg.fullscreen_mode : "Desktop");
+        int ww, wh;
+        SDL_GetWindowSize(win, &ww, &wh);
+        snprintf(b[G_WINDOW], 72, "Window size\t< %dx%d >", ww, wh);
+        snprintf(b[G_SCALE], 72, "Scaling\t< %s >", scale_names[cfg.scale_mode]);
+        shader_label(shader_index(), lbl, sizeof lbl);
+        snprintf(b[G_SHADER], 72, "Shader\t< %s >", lbl);
+        snprintf(b[G_PARAMS], 72, shader_param_count() ? "Shader parameters...\t%d" : "Shader parameters\t(none)", shader_param_count());
+        snprintf(b[G_PACING], 72, "Frame pacing\t< %s%s >", pacing_names[cfg.pacing],
+                 cfg.pacing == PACING_AUTO ? (vsync ? ": vsync" : ": audio") : "");
+        snprintf(b[G_BACK], 72, "Back");
+        foot = "LEFT/RIGHT CHANGE   ESC/B BACK";
+        break;
     }
-    static const char *const scale_names[] = { "Fit", "Integer", "Stretch" };
-    static const char *const pacing_names[] = { "Auto", "Audio", "Vsync" };
-    static const char *const ra_names[] = { "Off", "1 frame", "2 frames" };
-    static const char *const filter_names[] = { "Sharp", "Smooth", "Scanlines", "CRT" };
-    int ra = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
-    snprintf(b[M_RESUME], 64, "Resume");
-    snprintf(b[M_SAVE], 64, "Save state\tslot %d", slot());
-    snprintf(b[M_LOAD], 64, "Load state\tslot %d", slot());
-    snprintf(b[M_SLOT], 64, "State slot\t< %d >", slot());
-    snprintf(b[M_NETPLAY], 64, "Netplay...\t%s", in_netplay() ? "playing" : netplay_active() ? "connecting" : "");
-    snprintf(b[M_RUNAHEAD], 64, "Run-ahead (less lag)\t%s", ra_names[ra]);
-    snprintf(b[M_REWIND], 64, "Rewind\t%s", cfg.rewind ? "On" : "Off");
-    snprintf(b[M_TRAINING], 64, "Training mode\t%s", cfg.training ? "On" : "Off");
-    snprintf(b[M_INPUTS], 64, "Input display\t%s", cfg.input_display ? "On" : "Off");
-    snprintf(b[M_FULLSCREEN], 64, "Fullscreen\t%s", fullscreen ? "On" : "Off");
-    snprintf(b[M_SCALE], 64, "Scaling\t%s", scale_names[cfg.scale_mode]);
-    snprintf(b[M_FILTER], 64, "Filter\t%s", filter_names[cfg.filter]);
-    snprintf(b[M_PACING], 64, "Frame pacing\t%s%s", pacing_names[cfg.pacing],
-             cfg.pacing == PACING_AUTO ? (vsync ? " (vsync)" : " (audio)") : "");
-    if (muted) snprintf(b[M_VOLUME], 64, "Volume\tMuted");
-    else snprintf(b[M_VOLUME], 64, "Volume\t%d%%", volume);
-    static const char *const blood_names[] = { "None", "Low", "Medium", "High" };
-    bool dsw_pending = config_dsw() != hw.dsw && !in_netplay();
-    snprintf(b[M_FREEPLAY], 64, "Free play\t%s%s", cfg.free_play ? "On" : "Off", dsw_pending ? " (on reset)" : "");
-    snprintf(b[M_BLOOD], 64, "Blood\t%s%s", blood_names[cfg.blood & 3], dsw_pending ? " (on reset)" : "");
-    snprintf(b[M_AUTOCOIN], 64, "Auto-coin\t%s", cfg.free_play ? "(free play)" : cfg.auto_coin ? "On" : "Off");
-    snprintf(b[M_RESET], 64, "Reset game");
-    snprintf(b[M_QUIT], 64, "Quit");
-    for (int i = 0; i < M_COUNT; i++) items[i] = b[i];
-    osd_menu(out, "KILLER INSTINCT 2", items, M_COUNT, menu_sel, "ENTER/A SELECT   ESC/B CLOSE");
+    case PG_PARAMS:
+        title = "SHADER PARAMETERS";
+        for (int i = 0; i < n - 2; i++) {
+            shader_param_t *p = shader_param(i);
+            snprintf(b[i], 72, "%.30s\t%s%.4g", p->desc, p->value != p->def ? "*" : "", p->value);
+        }
+        snprintf(b[n - 2], 72, "Reset all to defaults");
+        snprintf(b[n - 1], 72, "Back");
+        foot = "LEFT/RIGHT ADJUST   ENTER RESETS ONE";
+        break;
+    case PG_CONTROLS:
+        title = "CONTROLS";
+        snprintf(b[C_P1], 72, "Player 1 keys...");
+        snprintf(b[C_P2], 72, "Player 2 keys...");
+        snprintf(b[C_PAD], 72, "Gamepad buttons...");
+        snprintf(b[C_HOTKEYS], 72, "Hotkeys...");
+        snprintf(b[C_PADHOT], 72, "Gamepad hotkeys...");
+        snprintf(b[C_SOCD], 72, "Left+right = neutral\t%s", onoff[cfg.socd]);
+        snprintf(b[C_RUMBLE], 72, "Rumble when hit\t%s", onoff[cfg.rumble]);
+        snprintf(b[C_DEADZONE], 72, "Stick deadzone\t< %d%% >", cfg.pad_deadzone * 100 / 32767);
+        snprintf(b[C_BACK], 72, "Back");
+        break;
+    case PG_BIND: {
+        static const char *const titles[] = { "PLAYER 1 KEYS", "PLAYER 2 KEYS", "GAMEPAD BUTTONS", "HOTKEYS", "GAMEPAD HOTKEYS" };
+        title = titles[bind_set];
+        for (int i = 0; i < n - 1; i++) {
+            const char *v;
+            if (capturing == i) v = bind_set == 2 || bind_set == 4 ? "press a button" : "press a key";
+            else if (bind_set <= 1) v = cfg.keys[bind_set][i] ? SDL_GetScancodeName(cfg.keys[bind_set][i]) : "-";
+            else if (bind_set == 2) v = pad_label(cfg.pad[i]);
+            else if (bind_set == 3) v = cfg.hotkeys[i] ? SDL_GetScancodeName(cfg.hotkeys[i]) : "-";
+            else v = pad_label(i == 0 ? cfg.pad_menu : i == 1 ? cfg.pad_rewind : cfg.pad_fast);
+            const char *name = bind_set <= 2 ? button_labels[i] : bind_set == 3 ? hotkey_labels[i] : pad_hotkey_labels[i];
+            snprintf(b[i], 72, "%s\t%s", name, v);
+        }
+        snprintf(b[n - 1], 72, "Back");
+        foot = capturing >= 0 ? "ESC CANCELS   BACKSPACE CLEARS" : "ENTER TO CHANGE";
+        break;
+    }
+    case PG_GAME: {
+        static const char *const blood_names[] = { "None", "Low", "Medium", "High" };
+        static const char *const ra_names[] = { "Off", "1 frame", "2 frames" };
+        bool pending = config_dsw() != hw.dsw && !in_netplay();
+        title = "GAME & SYSTEM";
+        if (muted) snprintf(b[S_VOLUME], 72, "Volume\t< Muted >");
+        else snprintf(b[S_VOLUME], 72, "Volume\t< %d%% >", volume);
+        snprintf(b[S_MUTE_BG], 72, "Mute in background\t%s", onoff[cfg.mute_unfocused]);
+        snprintf(b[S_PAUSE_BG], 72, "Pause in background\t%s", onoff[cfg.pause_unfocused]);
+        snprintf(b[S_FREEPLAY], 72, "Free play\t%s%s", onoff[cfg.free_play], pending ? " (on reset)" : "");
+        snprintf(b[S_BLOOD], 72, "Blood\t< %s >%s", blood_names[cfg.blood & 3], pending ? "*" : "");
+        snprintf(b[S_FINISH], 72, "Finishing moves\t%s", onoff[cfg.finishing_moves]);
+        snprintf(b[S_DEMO], 72, "Attract-mode sound\t%s", onoff[cfg.demo_sounds]);
+        snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t%s", cfg.free_play ? "(free play)" : onoff[cfg.auto_coin]);
+        int ra = cfg.run_ahead < 0 ? 0 : cfg.run_ahead > 2 ? 2 : cfg.run_ahead;
+        snprintf(b[S_RUNAHEAD], 72, "Run-ahead (less lag)\t< %s >", ra_names[ra]);
+        snprintf(b[S_REWIND], 72, "Rewind\t%s", onoff[cfg.rewind]);
+        snprintf(b[S_BACK], 72, "Back");
+        if (pending) foot = "SWITCH CHANGES APPLY ON RESET";
+        break;
+    }
+    case PG_PRACTICE:
+        title = "PRACTICE";
+        snprintf(b[T_TRAINING], 72, "Training mode\t%s", onoff[cfg.training]);
+        snprintf(b[T_INPUTS], 72, "Input display\t%s", onoff[cfg.input_display]);
+        snprintf(b[T_RECORD], 72, "Record dummy (player 2)");
+        snprintf(b[T_PLAY], 72, "Play / stop dummy");
+        snprintf(b[T_BACK], 72, "Back");
+        foot = "START A 2-PLAYER GAME FOR A DUMMY";
+        break;
+    case PG_NETPLAY:
+        title = "NETPLAY";
+        snprintf(b[N_HOST], 72, "Host a game\tport %d", cfg.net_port);
+        snprintf(b[N_JOIN], 72, "Join a game");
+        if (editing == N_ADDRESS) snprintf(b[N_ADDRESS], 72, "Address\t%.40s_", edit_buf);
+        else snprintf(b[N_ADDRESS], 72, "Address\t%.40s", *cfg.net_address ? cfg.net_address : "(enter)");
+        if (editing == N_PORT) snprintf(b[N_PORT], 72, "Port\t%.10s_", edit_buf);
+        else snprintf(b[N_PORT], 72, "Port\t%d", cfg.net_port);
+        snprintf(b[N_DELAY], 72, "Input delay\t< %d frames >", cfg.net_delay);
+        snprintf(b[N_DISCONNECT], 72, netplay_active() ? "Disconnect" : "(not connected)");
+        snprintf(b[N_BACK], 72, "Back");
+        foot = editing >= 0 ? "TYPE, THEN ENTER   ESC CANCELS" : netplay_active() ? netplay_status() : foot;
+        break;
+    }
+    for (int i = 0; i < n; i++) items[i] = b[i];
+    osd_menu(out, title, items, n, menu_sel, foot);
 }
+
+/* --- actions --- */
 
 static void menu_close(void)
 {
     menu_open = false;
-    menu_page = 0;
+    menu_page = PG_MAIN;
+    capturing = -1;
     if (editing >= 0) { editing = -1; SDL_StopTextInput(); }
     if (menu_changed) {
         cfg.volume = volume;
         cfg.fullscreen = fullscreen;
+        if (shader_active()) shader_params_save(cfg.shader_params, sizeof cfg.shader_params);
         if (config_save()) osd_message("Settings saved");
         menu_changed = false;
     }
 }
 
 static void cycle(int *v, int n, int dir) { *v = ((*v + dir) % n + n) % n; }
+
+static void go(int page, int sel) { menu_page = page; menu_sel = sel; capturing = -1; }
 
 static void start_join(void)
 {
@@ -466,73 +708,185 @@ static void start_join(void)
     else osd_message("%s", netplay_take_error());
 }
 
-static void netplay_page_change(int dir)
-{
-    switch (menu_sel) {
-    case N_HOST:
-        if (dir) return;
-        if (netplay_host(cfg.net_port, cfg.net_delay)) osd_message("Hosting on port %d: waiting for a player", cfg.net_port);
-        else osd_message("%s", netplay_take_error());
-        menu_close();
-        return;
-    case N_JOIN: if (!dir) { start_join(); menu_close(); } return;
-    case N_ADDRESS: case N_PORT:
-        if (dir) return;
-        editing = menu_sel;
-        if (menu_sel == N_ADDRESS) snprintf(edit_buf, sizeof edit_buf, "%s", cfg.net_address);
-        else snprintf(edit_buf, sizeof edit_buf, "%d", cfg.net_port);
-        SDL_StartTextInput();
-        return;
-    case N_DELAY: { int v = cfg.net_delay; v += dir ? dir : 1; cfg.net_delay = v < 0 ? 0 : v > 4 ? 4 : v; break; }
-    case N_DISCONNECT: if (!dir && netplay_active()) { netplay_stop(); osd_message("Netplay ended"); } return;
-    case N_BACK: if (!dir) { menu_page = 0; menu_sel = M_NETPLAY; } return;
-    }
-    menu_changed = true;
-}
-
 // Left/right on the selected item (dir = -1/+1), or Enter (dir = 0).
 static void menu_change(int dir)
 {
-    if (menu_page == 1) { netplay_page_change(dir); return; }
     int d = dir ? dir : 1;
-    switch (menu_sel) {
-    case M_RESUME: if (!dir) menu_close(); return;
-    case M_SAVE: if (!dir) { save_state(); menu_close(); } return;
-    case M_LOAD:
-        if (dir) return;
-        if (in_netplay()) not_in_netplay(); else load_state();
-        menu_close();
-        return;
-    case M_SLOT: { int s = slot() - 1; cycle(&s, 9, d); cfg.state_slot = s + 1; break; }
-    case M_NETPLAY: if (!dir) { menu_page = 1; menu_sel = netplay_active() ? N_DISCONNECT : N_HOST; } return;
-    case M_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
-    case M_REWIND: cfg.rewind = !cfg.rewind; if (!in_netplay()) apply_rewind_setting(); break;
-    case M_TRAINING: cfg.training = !cfg.training; break;
-    case M_INPUTS: cfg.input_display = !cfg.input_display; break;
-    case M_FULLSCREEN: set_fullscreen(!fullscreen); break;
-    case M_SCALE: cycle(&cfg.scale_mode, 3, d); break;
-    case M_FILTER: cycle(&cfg.filter, NFILTERS, d); break;
-    case M_PACING: cycle(&cfg.pacing, 3, d); choose_pacing(); break;
-    case M_VOLUME:
-        if (!dir) muted = !muted;
-        else { volume = volume + 10 * dir; volume = volume < 0 ? 0 : volume > 100 ? 100 : volume; muted = false; }
+    switch (menu_page) {
+    case PG_MAIN:
+        switch (menu_sel) {
+        case M_RESUME: if (!dir) menu_close(); return;
+        case M_SAVE: if (!dir) { save_state(); menu_close(); } return;
+        case M_LOAD:
+            if (dir) return;
+            if (in_netplay()) not_in_netplay(); else load_state();
+            menu_close();
+            return;
+        case M_SLOT: { int s = slot() - 1; cycle(&s, 9, d); cfg.state_slot = s + 1; break; }
+        case M_GRAPHICS: if (!dir) go(PG_GRAPHICS, 0); return;
+        case M_CONTROLS: if (!dir) go(PG_CONTROLS, 0); return;
+        case M_GAME: if (!dir) go(PG_GAME, 0); return;
+        case M_PRACTICE: if (!dir) go(PG_PRACTICE, 0); return;
+        case M_NETPLAY: if (!dir) go(PG_NETPLAY, netplay_active() ? N_DISCONNECT : N_HOST); return;
+        case M_RESET:
+            if (dir) return;
+            if (in_netplay()) { not_in_netplay(); return; }
+            hw.dsw = config_dsw();
+            machine_reset();
+            apply_rewind_setting();
+            ac.active = false;
+            frame_count = 0;
+            stop_audio();
+            menu_close();
+            osd_message("Reset");
+            return;
+        case M_QUIT: if (!dir) quit_requested = true; return;
+        }
         break;
-    case M_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
-    case M_FREEPLAY: cfg.free_play = !cfg.free_play; break;     // the game reads its switches at boot
-    case M_BLOOD: cycle(&cfg.blood, 4, d); break;
-    case M_RESET:
-        if (dir) return;
-        if (in_netplay()) { not_in_netplay(); return; }
-        hw.dsw = config_dsw();
-        machine_reset();
-        apply_rewind_setting();
-        ac.active = false;
-        frame_count = 0;
-        stop_audio();
-        menu_close();
-        osd_message("Reset");
+
+    case PG_GRAPHICS:
+        switch (menu_sel) {
+        case G_FULLSCREEN: {
+            int m = !fullscreen ? 0 : cfg.fullscreen_exclusive ? 2 : 1;
+            cycle(&m, 3, d);
+            cfg.fullscreen_exclusive = m == 2;
+            if (fullscreen && m) apply_fullscreen_mode(); else set_fullscreen(m != 0);
+            break;
+        }
+        case G_MODE: {
+            SDL_DisplayMode modes[64];
+            int n = display_modes(modes, 64), cur = -1;
+            for (int i = 0; i < n; i++) {
+                char s[32];
+                snprintf(s, sizeof s, "%dx%d@%d", modes[i].w, modes[i].h, modes[i].refresh_rate);
+                if (!strcmp(s, cfg.fullscreen_mode)) cur = i;
+            }
+            cur += d;                                   // -1 means "desktop"
+            if (cur < -1) cur = n - 1;
+            if (cur >= n) cur = -1;
+            if (cur < 0) cfg.fullscreen_mode[0] = 0;
+            else snprintf(cfg.fullscreen_mode, sizeof cfg.fullscreen_mode, "%dx%d@%d", modes[cur].w, modes[cur].h, modes[cur].refresh_rate);
+            if (fullscreen && cfg.fullscreen_exclusive) apply_fullscreen_mode();
+            break;
+        }
+        case G_WINDOW: {
+            if (fullscreen) { osd_message("Leave fullscreen to resize the window"); return; }
+            int ww, wh;
+            SDL_GetWindowSize(win, &ww, &wh);
+            int k = (wh + 120) / 240 + d;
+            if (k < 1) k = 8;
+            if (k > 8) k = 1;
+            SDL_SetWindowSize(win, 320 * k, 240 * k);
+            SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(win)),
+                                  SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(win)));
+            cfg.window_scale = k;
+            break;
+        }
+        case G_SCALE: cycle(&cfg.scale_mode, 3, d); break;
+        case G_SHADER: {
+            if (nshaders < 0 || !dir) scan_shaders();
+            int idx = shader_index(), total = NFILTERS + nshaders;
+            idx = idx >= total ? 0 : ((idx + d) % total + total) % total;
+            select_shader(idx);
+            break;
+        }
+        case G_PARAMS: if (!dir && shader_param_count()) go(PG_PARAMS, 0); return;
+        case G_PACING: cycle(&cfg.pacing, 3, d); choose_pacing(); break;
+        case G_BACK: if (!dir) go(PG_MAIN, M_GRAPHICS); return;
+        }
+        break;
+
+    case PG_PARAMS: {
+        int n = shader_param_count();
+        if (menu_sel == n + 1) { if (!dir) go(PG_GRAPHICS, G_PARAMS); return; }
+        if (menu_sel == n) {
+            if (dir) return;
+            for (int i = 0; i < n; i++) shader_param(i)->value = shader_param(i)->def;
+            break;
+        }
+        shader_param_t *p = shader_param(menu_sel);
+        if (!dir) p->value = p->def;
+        else {
+            p->value += p->step * dir;
+            if (p->value < p->min) p->value = p->min;
+            if (p->value > p->max) p->value = p->max;
+            if (p->value > -1e-6f && p->value < 1e-6f) p->value = 0;
+        }
+        break;
+    }
+
+    case PG_CONTROLS:
+        switch (menu_sel) {
+        case C_P1: case C_P2: case C_PAD: case C_HOTKEYS: case C_PADHOT:
+            if (!dir) { bind_set = menu_sel - C_P1; go(PG_BIND, 0); }
+            return;
+        case C_SOCD: cfg.socd = !cfg.socd; break;
+        case C_RUMBLE: cfg.rumble = !cfg.rumble; break;
+        case C_DEADZONE: {
+            int pct = cfg.pad_deadzone * 100 / 32767 + 5 * d;
+            pct = pct < 5 ? 5 : pct > 90 ? 90 : pct;
+            cfg.pad_deadzone = pct * 32767 / 100;
+            break;
+        }
+        case C_BACK: if (!dir) go(PG_MAIN, M_CONTROLS); return;
+        }
+        break;
+
+    case PG_BIND:
+        if (menu_sel == page_count() - 1) { if (!dir) go(PG_CONTROLS, C_P1 + bind_set); return; }
+        if (!dir) capturing = menu_sel;
         return;
-    case M_QUIT: if (!dir) quit_requested = true; return;
+
+    case PG_GAME:
+        switch (menu_sel) {
+        case S_VOLUME:
+            if (!dir) muted = !muted;
+            else { volume += 10 * dir; volume = volume < 0 ? 0 : volume > 100 ? 100 : volume; muted = false; }
+            break;
+        case S_MUTE_BG: cfg.mute_unfocused = !cfg.mute_unfocused; break;
+        case S_PAUSE_BG: cfg.pause_unfocused = !cfg.pause_unfocused; break;
+        case S_FREEPLAY: cfg.free_play = !cfg.free_play; break;     // the game reads its switches at power-on
+        case S_BLOOD: cycle(&cfg.blood, 4, d); break;
+        case S_FINISH: cfg.finishing_moves = !cfg.finishing_moves; break;
+        case S_DEMO: cfg.demo_sounds = !cfg.demo_sounds; break;
+        case S_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
+        case S_RUNAHEAD: cycle(&cfg.run_ahead, 3, d); break;
+        case S_REWIND: cfg.rewind = !cfg.rewind; if (!in_netplay()) apply_rewind_setting(); break;
+        case S_BACK: if (!dir) go(PG_MAIN, M_GAME); return;
+        }
+        break;
+
+    case PG_PRACTICE:
+        switch (menu_sel) {
+        case T_TRAINING: if (in_netplay()) { not_in_netplay(); return; } cfg.training = !cfg.training; break;
+        case T_INPUTS: cfg.input_display = !cfg.input_display; break;
+        case T_RECORD: if (!dir) { if (in_netplay()) not_in_netplay(); else { training_record_toggle(); menu_close(); } } return;
+        case T_PLAY: if (!dir) { if (in_netplay()) not_in_netplay(); else { training_play_toggle(); menu_close(); } } return;
+        case T_BACK: if (!dir) go(PG_MAIN, M_PRACTICE); return;
+        }
+        break;
+
+    case PG_NETPLAY:
+        switch (menu_sel) {
+        case N_HOST:
+            if (dir) return;
+            if (netplay_host(cfg.net_port, cfg.net_delay)) osd_message("Hosting on port %d: waiting for a player", cfg.net_port);
+            else osd_message("%s", netplay_take_error());
+            menu_close();
+            return;
+        case N_JOIN: if (!dir) { start_join(); menu_close(); } return;
+        case N_ADDRESS: case N_PORT:
+            if (dir) return;
+            editing = menu_sel;
+            if (menu_sel == N_ADDRESS) snprintf(edit_buf, sizeof edit_buf, "%s", cfg.net_address);
+            else snprintf(edit_buf, sizeof edit_buf, "%d", cfg.net_port);
+            SDL_StartTextInput();
+            return;
+        case N_DELAY: { int v = cfg.net_delay + d; cfg.net_delay = v < 0 ? 0 : v > 4 ? 4 : v; break; }
+        case N_DISCONNECT: if (!dir && netplay_active()) { netplay_stop(); osd_message("Netplay ended"); } return;
+        case N_BACK: if (!dir) go(PG_MAIN, M_NETPLAY); return;
+        }
+        break;
     }
     menu_changed = true;
 }
@@ -540,18 +894,29 @@ static void menu_change(int dir)
 static void menu_toggle(void)
 {
     if (menu_open) menu_close();
-    else { menu_open = true; menu_page = 0; if (!in_netplay()) stop_audio(); }
+    else { menu_open = true; go(PG_MAIN, 0); if (!in_netplay()) stop_audio(); }
+}
+
+static void menu_back(void)
+{
+    switch (menu_page) {
+    case PG_MAIN: menu_close(); break;
+    case PG_PARAMS: go(PG_GRAPHICS, G_PARAMS); break;
+    case PG_BIND: go(PG_CONTROLS, C_P1 + bind_set); break;
+    case PG_GRAPHICS: go(PG_MAIN, M_GRAPHICS); break;
+    case PG_CONTROLS: go(PG_MAIN, M_CONTROLS); break;
+    case PG_GAME: go(PG_MAIN, M_GAME); break;
+    case PG_PRACTICE: go(PG_MAIN, M_PRACTICE); break;
+    case PG_NETPLAY: go(PG_MAIN, M_NETPLAY); break;
+    }
 }
 
 static void menu_nav(int up_down, int left_right, bool enter, bool back)
 {
-    if (up_down) cycle(&menu_sel, menu_page ? N_COUNT : M_COUNT, up_down);
+    if (up_down) cycle(&menu_sel, page_count(), up_down);
     if (left_right) menu_change(left_right);
     if (enter) menu_change(0);
-    if (back) {
-        if (menu_page) { menu_page = 0; menu_sel = M_NETPLAY; }
-        else menu_close();
-    }
+    if (back) menu_back();
 }
 
 // Typing into the address or port field.
@@ -574,6 +939,22 @@ static void edit_key(SDL_Scancode sc, const char *text)
     } else if (sc == SDL_SCANCODE_ESCAPE) { editing = -1; SDL_StopTextInput(); }
 }
 
+// A key or pad button for the binding being captured. key = 0: pad input.
+static void capture(SDL_Scancode key, int pad_button, bool clear)
+{
+    int row = capturing;
+    bool pad_set = bind_set == 2 || bind_set == 4;
+    if (!clear && (pad_set ? pad_button == PAD_NONE : !key)) return;    // wrong kind of input: keep waiting
+    capturing = -1;
+    switch (bind_set) {
+    case 0: case 1: cfg.keys[bind_set][row] = clear ? SDL_SCANCODE_UNKNOWN : key; break;
+    case 2: cfg.pad[row] = clear ? PAD_NONE : pad_button; break;
+    case 3: cfg.hotkeys[row] = clear ? SDL_SCANCODE_UNKNOWN : key; break;
+    case 4: *(row == 0 ? &cfg.pad_menu : row == 1 ? &cfg.pad_rewind : &cfg.pad_fast) = clear ? PAD_NONE : pad_button; break;
+    }
+    menu_changed = true;
+}
+
 /* ---------------------------------------------------------------- */
 /* Events                                                           */
 /* ---------------------------------------------------------------- */
@@ -589,9 +970,18 @@ static bool handle_events(void)
         case SDL_CONTROLLERDEVICEREMOVED: pad_removed(ev.cdevice.which); break;
         case SDL_WINDOWEVENT:
             if (ev.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED || ev.window.event == SDL_WINDOWEVENT_MOVED) choose_pacing();
+            if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST) { focused = false; if (cfg.mute_unfocused || cfg.pause_unfocused) stop_audio(); }
+            if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) focused = true;
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            if (menu_open && capturing >= 0 && ev.caxis.value > 20000) {
+                if (ev.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) capture(0, PAD_LT, false);
+                if (ev.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) capture(0, PAD_RT, false);
+            }
             break;
         case SDL_CONTROLLERBUTTONDOWN: {
             int b = ev.cbutton.button;
+            if (menu_open && capturing >= 0) { capture(0, b, false); break; }
             SDL_GameController *c = SDL_GameControllerFromInstanceID(ev.cbutton.which);
             bool combo = c && ((b == SDL_CONTROLLER_BUTTON_START && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_BACK)) ||
                                (b == SDL_CONTROLLER_BUTTON_BACK && SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_START)));
@@ -608,7 +998,15 @@ static bool handle_events(void)
         case SDL_KEYDOWN: {
             SDL_Scancode sc = ev.key.keysym.scancode;
             if (editing >= 0) { edit_key(sc, NULL); break; }
+            if (menu_open && capturing >= 0) {
+                if (ev.key.repeat) break;
+                if (sc == SDL_SCANCODE_ESCAPE) capturing = -1;
+                else if (sc == SDL_SCANCODE_BACKSPACE) capture(0, PAD_NONE, true);
+                else capture(sc, PAD_NONE, false);
+                break;
+            }
             bool alt_enter = sc == SDL_SCANCODE_RETURN && (ev.key.keysym.mod & KMOD_ALT);
+            if (sc == SDL_SCANCODE_ESCAPE && menu_open) { if (!ev.key.repeat) menu_back(); break; }
             if (sc == SDL_SCANCODE_ESCAPE || is_hotkey(sc, HK_MENU)) { if (!ev.key.repeat) menu_toggle(); break; }
             if (menu_open && !alt_enter) {
                 menu_nav(sc == SDL_SCANCODE_UP ? -1 : sc == SDL_SCANCODE_DOWN ? 1 : 0,
@@ -618,7 +1016,7 @@ static bool handle_events(void)
                 break;
             }
             if (ev.key.repeat && !is_hotkey(sc, HK_VOL_UP) && !is_hotkey(sc, HK_VOL_DOWN) && !is_hotkey(sc, HK_STEP)) break;
-            if (alt_enter || is_hotkey(sc, HK_FULLSCREEN)) { set_fullscreen(!fullscreen); if (menu_open) menu_changed = true; }
+            if (alt_enter || is_hotkey(sc, HK_FULLSCREEN)) { set_fullscreen(!fullscreen); menu_changed = true; }
             else if (in_netplay() && (is_hotkey(sc, HK_PAUSE) || is_hotkey(sc, HK_STEP) || is_hotkey(sc, HK_LOAD_STATE) ||
                                       is_hotkey(sc, HK_TRAINING) || is_hotkey(sc, HK_DUMMY_RECORD) || is_hotkey(sc, HK_DUMMY_PLAY)))
                 not_in_netplay();
@@ -656,6 +1054,7 @@ static void emulate_frame(void)
     run_frame();
     state_checkpoint();
     frame_count++;
+    rumble_check();
 }
 
 // Show the frame `run_ahead` frames in the future (same inputs), then
@@ -680,6 +1079,7 @@ static void np_run(const uint16_t in[2], bool resim)
         frame_count++;
     }
     machine_run_inputs(in, resim);
+    if (!resim) rumble_check();
 }
 
 static void np_reset(void)
@@ -707,6 +1107,43 @@ static uint16_t netplay_input(void)
 }
 
 const char *opt_net_host, *opt_net_join;     // from the command line
+bool opt_test_shaders;
+
+static bool apply_shader(void)
+{
+    char path[2048], err[1024];
+    if (!*cfg.shader) { video_set_shader(NULL, err, sizeof err); return true; }
+    snprintf(path, sizeof path, "%s%s", base_dir(), cfg.shader);
+    if (!video_set_shader(path, err, sizeof err)) {
+        fprintf(stderr, "shader: %s\n", err);
+        osd_message("Shader failed to load (see ki2.log)");
+        return false;
+    }
+    shader_params_apply(cfg.shader_params);
+    return true;
+}
+
+// --test-shaders: load and draw every preset under shaders/, report each one.
+static int test_shaders(void)
+{
+    static char names[512][192];
+    char dir[2048];
+    snprintf(dir, sizeof dir, "%sshaders", base_dir());
+    int n = shader_list(dir, names, 512), ok = 0;
+    for (int i = 0; i < n; i++) {
+        char path[2400], err[1024];
+        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        uint64_t t0 = SDL_GetPerformanceCounter();
+        bool good = video_set_shader(path, err, sizeof err);
+        if (good) for (int k = 0; k < 3; k++) { to_rgb(px); osd_clear(ov); video_present(px, ov, cfg.filter, cfg.scale_mode); }
+        double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+        printf("%-4s %-60s %6.1f ms  %d params%s%s\n", good ? "OK" : "FAIL", names[i], ms, good ? shader_param_count() : 0,
+               good ? "" : "\n     ", good ? "" : err);
+        ok += good;
+    }
+    printf("%d of %d presets work\n", ok, n);
+    return ok == n ? 0 : 1;
+}
 
 /* ---------------------------------------------------------------- */
 
@@ -725,6 +1162,19 @@ int frontend_main(void)
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
     win = video_open("Killer Instinct 2", 320 * scale, 240 * scale);
     if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    set_window_icon(win);
+    if (cfg.window_w >= 320 && cfg.window_h >= 240) {
+        // where it was last time, if that is still on a screen
+        for (int d = 0; d < SDL_GetNumVideoDisplays(); d++) {
+            SDL_Rect r;
+            SDL_Point pt = { cfg.window_x + 40, cfg.window_y + 40 };
+            if (SDL_GetDisplayBounds(d, &r) == 0 && SDL_PointInRect(&pt, &r)) {
+                SDL_SetWindowSize(win, cfg.window_w, cfg.window_h);
+                SDL_SetWindowPosition(win, cfg.window_x, cfg.window_y);
+                break;
+            }
+        }
+    }
     fprintf(stderr, "video: %s\n", video_backend());
     if (cfg.fullscreen) set_fullscreen(true);
     choose_pacing();
@@ -737,6 +1187,8 @@ int frontend_main(void)
     volume = cfg.volume < 0 ? 0 : cfg.volume > 100 ? 100 : cfg.volume;
     int latency = cfg.audio_latency_ms > 10 ? cfg.audio_latency_ms : 10;
 
+    if (opt_test_shaders) { int r = test_shaders(); video_close(); SDL_Quit(); return r; }
+    apply_shader();
     netplay_set_callbacks(np_run, np_reset);
     if (opt_net_host) {
         int port = *opt_net_host ? atoi(opt_net_host) : cfg.net_port;
@@ -773,7 +1225,7 @@ int frontend_main(void)
         bool fast = key_held(HK_FAST) || pad_held(cfg.pad_fast) || booting;
         bool rewinding = cfg.rewind && (key_held(HK_REWIND) || pad_held(cfg.pad_rewind));
 
-        if (menu_open || (paused && !step_once)) {
+        if (menu_open || (paused && !step_once) || (!focused && cfg.pause_unfocused)) {
             present(menu_open ? NULL : "PAUSED");
             if (!vsync) SDL_Delay(16);
             next = SDL_GetPerformanceCounter();
@@ -846,6 +1298,13 @@ int frontend_main(void)
         }
     }
     if (menu_changed) menu_close();
+    if (!fullscreen) {
+        SDL_GetWindowPosition(win, &cfg.window_x, &cfg.window_y);
+        SDL_GetWindowSize(win, &cfg.window_w, &cfg.window_h);
+    }
+    cfg.fullscreen = fullscreen;
+    cfg.volume = volume;
+    config_save();
     video_close();
     SDL_Quit();
     return 0;
