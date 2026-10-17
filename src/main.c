@@ -132,6 +132,62 @@ static keymap_t keys[] = {
     { SDL_SCANCODE_9, &hw.p2, 0x2000 },
 };
 
+// Game controllers: the first one connected is player 1, the second player 2.
+// Face buttons follow the cabinet: top row punches, bottom row kicks.
+//   X / Y / RB  = high quick / medium / fierce
+//   A / B / RT  = low quick / medium / fierce
+//   D-pad or left stick = move, Start = start, Back = coin
+#define MAX_PADS 2
+static SDL_GameController *pads[MAX_PADS];
+
+static const struct { SDL_GameControllerButton b; uint32_t bit; } pad_buttons[] = {
+    { SDL_CONTROLLER_BUTTON_X, 0x0001 }, { SDL_CONTROLLER_BUTTON_Y, 0x0002 },
+    { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x0004 },
+    { SDL_CONTROLLER_BUTTON_A, 0x0008 }, { SDL_CONTROLLER_BUTTON_B, 0x0010 },
+    { SDL_CONTROLLER_BUTTON_DPAD_UP, 0x0040 }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0x0080 },
+    { SDL_CONTROLLER_BUTTON_DPAD_LEFT, 0x0100 }, { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 0x0200 },
+    { SDL_CONTROLLER_BUTTON_START, 0x0400 }, { SDL_CONTROLLER_BUTTON_BACK, 0x0800 },
+};
+
+static void pad_added(int index)
+{
+    for (int i = 0; i < MAX_PADS; i++) {
+        if (pads[i]) continue;
+        pads[i] = SDL_GameControllerOpen(index);
+        if (pads[i]) fprintf(stderr, "pad: player %d = %s\n", i + 1, SDL_GameControllerName(pads[i]));
+        return;
+    }
+}
+
+static void pad_removed(SDL_JoystickID id)
+{
+    for (int i = 0; i < MAX_PADS; i++)
+        if (pads[i] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pads[i])) == id) {
+            fprintf(stderr, "pad: player %d disconnected\n", i + 1);
+            SDL_GameControllerClose(pads[i]);
+            pads[i] = NULL;
+        }
+}
+
+static void read_pads(void)
+{
+    const int dead = 16000, trigger = 12000;
+    for (int i = 0; i < MAX_PADS; i++) {
+        SDL_GameController *c = pads[i];
+        if (!c) continue;
+        uint32_t *port = i ? &hw.p2 : &hw.p1;
+        for (size_t k = 0; k < sizeof pad_buttons / sizeof pad_buttons[0]; k++)
+            if (SDL_GameControllerGetButton(c, pad_buttons[k].b)) *port &= ~pad_buttons[k].bit;
+        if (SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > trigger) *port &= ~0x0020u;
+        int x = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
+        int y = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY);
+        if (y < -dead) *port &= ~0x0040u;
+        if (y > dead) *port &= ~0x0080u;
+        if (x < -dead) *port &= ~0x0100u;
+        if (x > dead) *port &= ~0x0200u;
+    }
+}
+
 // Scripted input for headless runs: "frame:button:duration,..."
 typedef struct { const char *name; uint32_t *port; uint32_t bit; } button_t;
 static const button_t buttons[] = {
@@ -291,7 +347,12 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+    {   // extra controller mappings (https://github.com/mdqinc/SDL_GameControllerDB), if present
+        static char db_buf[4096];
+        const char *db = find_data("gamecontrollerdb.txt", argv[0], db_buf, sizeof db_buf);
+        if (access(db, R_OK) == 0) SDL_GameControllerAddMappingsFromFile(db);
+    }
     SDL_Window *win = SDL_CreateWindow("Killer Instinct 2", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                        960, 720, SDL_WINDOW_RESIZABLE);
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
@@ -310,12 +371,15 @@ int main(int argc, char **argv)
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = false;
+            if (ev.type == SDL_CONTROLLERDEVICEADDED) pad_added(ev.cdevice.which);
+            if (ev.type == SDL_CONTROLLERDEVICEREMOVED) pad_removed(ev.cdevice.which);
             if (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE) running = false;
         }
         const uint8_t *ks = SDL_GetKeyboardState(NULL);
         hw.p1 = hw.p2 = 0xffffffffu;
         for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
             if (ks[keys[i].key]) *keys[i].port &= ~keys[i].bit;
+        read_pads();
 
         run_frame();
         pump_audio(adev);
