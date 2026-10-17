@@ -61,6 +61,8 @@ void io_write(uint32_t pa, uint32_t val, int size)
         return;
     }
     case 0x10000088: return;
+    case 0x10000000: return;   // written 1 at boot (board control/watchdog)
+    case 0x10000178: return;   // IDE cs1 reg 7 (drive address), unused
     case 0x10000090: hw.sound_reset = val; sound_reset_w(val & 1); return;
     case 0x10000098: hw.vram_control = val; return;
     case 0x100000a0: hw.sound_data = val; return;
