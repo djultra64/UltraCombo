@@ -24,7 +24,9 @@ typedef struct {
     tlb_entry_t tlb[48];
 
     uint64_t cycles;      // total instructions executed
-    uint32_t count_frac;  // Count ticks at half the pipeline clock
+    uint32_t count_base;  // Count value at count_cyc; Count ticks at half the pipeline clock
+    uint64_t count_cyc;
+    uint64_t next_compare; // cycle at which Count reaches Compare
     uint32_t ext_irq;     // external interrupt lines (bit n = Int n)
 } cpu_t;
 

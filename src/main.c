@@ -237,11 +237,13 @@ int main(int argc, char **argv)
             apply_script(f);
             uint64_t t0 = SDL_GetPerformanceCounter();
             run_frame();
-            static double acc_ms;
-            acc_ms += (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+            static double acc_ms, max_ms;
+            double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
+            acc_ms += ms;
+            if (ms > max_ms) max_ms = ms;
             if (f % 60 == 0) {
-                if (getenv("KI2_SPEED")) fprintf(stderr, "frames %d-%d: %.1f ms/frame (%.0f%% speed)\n", f - 59, f, acc_ms / 60, 100.0 * (1000.0 / FRAME_HZ) / (acc_ms / 60));
-                acc_ms = 0;
+                if (getenv("KI2_SPEED")) fprintf(stderr, "frames %d-%d: %.1f ms/frame (%.0f%% speed) worst %.1f ms\n", f - 59, f, acc_ms / 60, 100.0 * (1000.0 / FRAME_HZ) / (acc_ms / 60), max_ms);
+                acc_ms = max_ms = 0;
             }
             if (getenv("KI2_DUMP_AT") && f == atoi(getenv("KI2_DUMP_AT"))) {
                 FILE *o = fopen("ram0.bin", "wb"); fwrite(ram0, 1, RAM0_SIZE, o); fclose(o);
@@ -310,8 +312,8 @@ int main(int argc, char **argv)
         SDL_RenderPresent(ren);
 
         if (adev) {
-            // the audio device is the clock: keep ~50 ms queued, run ahead otherwise
-            while (SDL_GetQueuedAudioSize(adev) > AUDIO_HZ * 2 * 50 / 1000) SDL_Delay(1);
+            // the audio device is the clock: keep ~70 ms queued, run ahead otherwise
+            while (SDL_GetQueuedAudioSize(adev) > AUDIO_HZ * 2 * 70 / 1000) SDL_Delay(1);
             next = SDL_GetPerformanceCounter();
         } else {
             next += (uint64_t)(freq / FRAME_HZ);

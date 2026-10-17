@@ -24,6 +24,7 @@ bool cpu_idle;
 
 // Thrown-exception mechanism: memory helpers set this and the step aborts.
 static bool exc_raised;
+static bool irq_dirty = true;   // recheck pending interrupts before the next instruction
 static bool tlb_refill;
 
 
@@ -124,6 +125,7 @@ static inline void update_irq_cause(void)
     uint32_t cause = (uint32_t)cpu.cp0[CP0_CAUSE];
     cause = (cause & ~0x7c00u) | ((cpu.ext_irq & 0x1f) << 10);
     cpu.cp0[CP0_CAUSE] = cause;
+    irq_dirty = true;
 }
 
 void cpu_set_irq(int line, bool state)
@@ -248,10 +250,26 @@ static inline uint32_t fetch(uint32_t va)
 /* COP0                                                             */
 /* ---------------------------------------------------------------- */
 
-static void count_compare_check(void)
+static inline uint32_t count_now(void)
 {
-    if ((uint32_t)cpu.cp0[CP0_COUNT] == (uint32_t)cpu.cp0[CP0_COMPARE])
+    return cpu.count_base + (uint32_t)((cpu.cycles - cpu.count_cyc) / 2);
+}
+
+static void schedule_compare(void)
+{
+    uint32_t delta = (uint32_t)cpu.cp0[CP0_COMPARE] - cpu.count_base;
+    uint64_t at = cpu.count_cyc + 2 * (uint64_t)delta;
+    while (at <= cpu.cycles) at += 2ull << 32;
+    cpu.next_compare = at;
+}
+
+static inline void compare_check(void)
+{
+    if (cpu.cycles >= cpu.next_compare) {
         cpu.cp0[CP0_CAUSE] |= 0x8000;  // IP7 timer
+        cpu.next_compare += 2ull << 32;
+        irq_dirty = true;
+    }
 }
 
 static uint64_t cp0_read(int reg)
@@ -262,7 +280,7 @@ static uint64_t cp0_read(int reg)
         uint32_t range = 48 - wired;
         return wired + (uint32_t)(cpu.cycles % (range ? range : 1));
     }
-    case CP0_COUNT: return (uint32_t)cpu.cp0[CP0_COUNT];
+    case CP0_COUNT: return count_now();
     default: return cpu.cp0[reg];
     }
 }
@@ -275,15 +293,18 @@ static void cp0_write(int reg, uint64_t v)
     case CP0_ENTRYLO0: case CP0_ENTRYLO1: cpu.cp0[reg] = v & 0x3fffffff; break;
     case CP0_PAGEMASK: cpu.cp0[reg] = v & 0x01ffe000; break;
     case CP0_WIRED: cpu.cp0[reg] = v & 63; break;
-    case CP0_COUNT: cpu.cp0[reg] = (uint32_t)v; break;
+    case CP0_COUNT: cpu.count_base = (uint32_t)v; cpu.count_cyc = cpu.cycles; schedule_compare(); break;
     case CP0_COMPARE:
+        cpu.count_base = count_now(); cpu.count_cyc = cpu.cycles;
         cpu.cp0[reg] = (uint32_t)v;
         cpu.cp0[CP0_CAUSE] &= ~0x8000ull;
+        schedule_compare();
         break;
     case CP0_CAUSE:
         cpu.cp0[reg] = (cpu.cp0[reg] & ~0x300ull) | (v & 0x300);
+        irq_dirty = true;
         break;
-    case CP0_STATUS: cpu.cp0[reg] = (uint32_t)v; break;
+    case CP0_STATUS: cpu.cp0[reg] = (uint32_t)v; irq_dirty = true; break;
     case CP0_CONFIG: cpu.cp0[reg] = (cpu.cp0[reg] & ~7ull) | (v & 7); break;
     default: cpu.cp0[reg] = v; break;
     }
@@ -344,6 +365,7 @@ static void exec_cop0(uint32_t op)
             if (sr & SR_ERL) { cpu.pc = (uint32_t)cpu.cp0[CP0_ERROREPC]; sr &= ~SR_ERL; }
             else { cpu.pc = (uint32_t)cpu.cp0[CP0_EPC]; sr &= ~SR_EXL; }
             cpu.cp0[CP0_STATUS] = sr;
+            irq_dirty = true;
             cpu.npc = cpu.pc + 4;
             cpu.next_delay = false;
             cpu.llbit = false;
@@ -773,6 +795,8 @@ void cpu_reset(void)
     // IC=DC=16KB, 32-byte lines, little-endian, KSEG0 cacheable
     cpu.cp0[CP0_CONFIG] = (2u << 9) | (2u << 6) | (1u << 5) | (1u << 4) | 3;
     cpu.cp0[CP0_WIRED] = 0;
+    schedule_compare();
+    irq_dirty = true;
 }
 
 void cpu_skip(uint64_t n)
@@ -781,13 +805,8 @@ void cpu_skip(uint64_t n)
         int r = idle_loop.cnt_reg;
         cpu.r[r] = SX32((uint32_t)cpu.r[r] + (uint32_t)(n / 5) * (uint32_t)(int32_t)idle_loop.cnt_imm);
     }
-    uint32_t count = (uint32_t)cpu.cp0[CP0_COUNT];
-    uint32_t ticks = (uint32_t)((cpu.count_frac + n) / 2 - cpu.count_frac / 2);
-    uint32_t to_compare = (uint32_t)cpu.cp0[CP0_COMPARE] - count;
-    if (to_compare != 0 && to_compare <= ticks) cpu.cp0[CP0_CAUSE] |= 0x8000;
-    cpu.cp0[CP0_COUNT] = count + ticks;
-    cpu.count_frac += (uint32_t)n;
     cpu.cycles += n;
+    compare_check();
 }
 
 uint64_t cpu_run(uint64_t n)
@@ -799,7 +818,7 @@ uint64_t cpu_run(uint64_t n)
         cpu.cur_pc = cpu.pc;
         cpu.in_delay = cpu.next_delay;
         exc_raised = false;
-        if (irq_pending()) {
+        if (irq_dirty && (irq_dirty = false, irq_pending())) {
             cpu_exception(EXC_INT, 0, false);
             cpu.cur_pc = cpu.pc;
             cpu.in_delay = false;
@@ -818,10 +837,7 @@ uint64_t cpu_run(uint64_t n)
             exec(op);
         }
         cpu.cycles++;
-        if (++cpu.count_frac & 1) {
-            cpu.cp0[CP0_COUNT] = (uint32_t)(cpu.cp0[CP0_COUNT] + 1);
-            count_compare_check();
-        }
+        compare_check();
     }
     return cpu.cycles - start;
 }
