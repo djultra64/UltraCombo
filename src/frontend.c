@@ -15,6 +15,7 @@
 #include "netplay.h"
 #include "training.h"
 #include "icon.h"
+#include "adjust.h"
 #include "video.h"
 #include "shaders.h"
 #include <SDL2/SDL.h>
@@ -120,12 +121,47 @@ static void set_fullscreen(bool on)
 static void draw_menu(uint32_t *ov);
 static void draw_inputs(uint32_t *ov);
 
+// Performance overlay: measured over the last second.
+static struct { double emu_ms, emu_acc, fps; int emu_n, frames; uint64_t t0; } perf;
+
+static void perf_emu(uint64_t start)
+{
+    perf.emu_acc += (SDL_GetPerformanceCounter() - start) * 1000.0 / SDL_GetPerformanceFrequency();
+    perf.emu_n++;
+}
+
+static double queued_ms(void);
+
+static void draw_perf(uint32_t *ov)
+{
+    uint64_t now = SDL_GetPerformanceCounter(), f = SDL_GetPerformanceFrequency();
+    perf.frames++;
+    if (!perf.t0) perf.t0 = now;
+    if (now - perf.t0 >= f) {
+        double s = (double)(now - perf.t0) / (double)f;
+        perf.fps = perf.frames / s;
+        perf.emu_ms = perf.emu_n ? perf.emu_acc / perf.emu_n : 0;
+        perf.frames = perf.emu_n = 0;
+        perf.emu_acc = 0;
+        perf.t0 = now;
+    }
+    if (!cfg.perf_overlay) return;
+    char l1[48], l2[48];
+    snprintf(l1, sizeof l1, "%.1f FPS  AUDIO %.0f MS", perf.fps, queued_ms());
+    snprintf(l2, sizeof l2, "EMU %.2f MS  %.0f%% SPEED", perf.emu_ms, perf.emu_ms > 0 ? 100.0 * (1000.0 / FRAME_HZ) / perf.emu_ms : 0);
+    int w = (int)(strlen(l1) > strlen(l2) ? strlen(l1) : strlen(l2)) * 6 + 6;
+    osd_box(ov, 320 - w - 2, 240 - 34, w, 20, 0xb0000000u);
+    osd_text(ov, 320 - w + 1, 240 - 32, l1, 0x80ff80);
+    osd_text(ov, 320 - w + 1, 240 - 23, l2, 0x80ff80);
+}
+
 static void present(const char *status)
 {
     if (!status) status = training_status();
     to_rgb(px);
     osd_clear(ov);
     draw_inputs(ov);
+    draw_perf(ov);
     osd_draw(ov, status);
     draw_menu(ov);
     video_present(px, ov, cfg.filter, cfg.scale_mode);
@@ -417,11 +453,11 @@ enum { PG_MAIN, PG_GRAPHICS, PG_PARAMS, PG_CONTROLS, PG_BIND, PG_GAME, PG_PRACTI
 // Main page
 enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
 // Graphics
-enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_BACK, G_COUNT };
+enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 // Controls
 enum { C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_BACK, C_COUNT };
 // Game & system
-enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_DIFFICULTY, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
 // Practice
 enum { T_TRAINING, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
 // Netplay
@@ -435,6 +471,7 @@ static int bind_set;                 // PG_BIND: 0 P1 keys, 1 P2 keys, 2 pad but
 static int capturing = -1;           // row waiting for a key or button
 
 static bool in_netplay(void) { return netplay_running(); }
+static int boot_difficulty;          // as read when the machine last powered on
 static void not_in_netplay(void) { osd_message("Not available during netplay"); }
 
 static const char *const button_labels[NBUTTONS] = {
@@ -445,7 +482,7 @@ static const char *const hotkey_labels[NHOTKEYS] = {
     "Menu", "Pause", "Frame advance", "Fast-forward (hold)", "Rewind (hold)", "Save state", "Load state",
     "Next state slot", "Fullscreen", "Screenshot", "Volume up", "Volume down", "Mute", "Test (operator)",
     "Service credit", "Cabinet volume up", "Cabinet volume down", "Input display", "Training mode",
-    "Record dummy", "Play dummy",
+    "Record dummy", "Play dummy", "Performance overlay",
 };
 static const char *const pad_hotkey_labels[3] = { "Menu", "Rewind (hold)", "Fast-forward (hold)" };
 
@@ -584,6 +621,7 @@ static void draw_menu(uint32_t *out)
         snprintf(b[G_PARAMS], 72, shader_param_count() ? "Shader parameters...\t%d" : "Shader parameters\t(none)", shader_param_count());
         snprintf(b[G_PACING], 72, "Frame pacing\t< %s%s >", pacing_names[cfg.pacing],
                  cfg.pacing == PACING_AUTO ? (vsync ? ": vsync" : ": audio") : "");
+        snprintf(b[G_PERF], 72, "Performance overlay\t%s", onoff[cfg.perf_overlay]);
         snprintf(b[G_BACK], 72, "Back");
         foot = "LEFT/RIGHT CHANGE   ESC/B BACK";
         break;
@@ -636,6 +674,11 @@ static void draw_menu(uint32_t *out)
         else snprintf(b[S_VOLUME], 72, "Volume\t< %d%% >", volume);
         snprintf(b[S_MUTE_BG], 72, "Mute in background\t%s", onoff[cfg.mute_unfocused]);
         snprintf(b[S_PAUSE_BG], 72, "Pause in background\t%s", onoff[cfg.pause_unfocused]);
+        static const char *const diff_names[] = { "?", "Extra easy", "Easy", "Medium", "Hard", "Extra hard" };
+        int dl = adjust_difficulty();
+        snprintf(b[S_DIFFICULTY], 72, "CPU difficulty\t< %s >%s", dl < 0 ? "(unknown)" : diff_names[dl],
+                 dl > 0 && dl != boot_difficulty ? " (on reset)" : "");
+        if (dl > 0 && dl != boot_difficulty) foot = "CHANGES APPLY ON RESET GAME";
         snprintf(b[S_FREEPLAY], 72, "Free play\t%s%s", onoff[cfg.free_play], pending ? " (on reset)" : "");
         snprintf(b[S_BLOOD], 72, "Blood\t< %s >%s", blood_names[cfg.blood & 3], pending ? "*" : "");
         snprintf(b[S_FINISH], 72, "Finishing moves\t%s", onoff[cfg.finishing_moves]);
@@ -733,6 +776,7 @@ static void menu_change(int dir)
             if (in_netplay()) { not_in_netplay(); return; }
             hw.dsw = config_dsw();
             machine_reset();
+            boot_difficulty = adjust_difficulty();
             apply_rewind_setting();
             ac.active = false;
             frame_count = 0;
@@ -792,6 +836,7 @@ static void menu_change(int dir)
         }
         case G_PARAMS: if (!dir && shader_param_count()) go(PG_PARAMS, 0); return;
         case G_PACING: cycle(&cfg.pacing, 3, d); choose_pacing(); break;
+        case G_PERF: cfg.perf_overlay = !cfg.perf_overlay; break;
         case G_BACK: if (!dir) go(PG_MAIN, M_GRAPHICS); return;
         }
         break;
@@ -845,6 +890,15 @@ static void menu_change(int dir)
             break;
         case S_MUTE_BG: cfg.mute_unfocused = !cfg.mute_unfocused; break;
         case S_PAUSE_BG: cfg.pause_unfocused = !cfg.pause_unfocused; break;
+        case S_DIFFICULTY: {
+            if (in_netplay()) { not_in_netplay(); return; }
+            int dl = adjust_difficulty();
+            if (dl < 0) { osd_message("The disk's settings block is not readable"); return; }
+            dl += d;
+            dl = dl < 1 ? 5 : dl > 5 ? 1 : dl;
+            adjust_set_difficulty(dl);                         // stored on the disk, like the operator menu
+            break;
+        }
         case S_FREEPLAY: cfg.free_play = !cfg.free_play; break;     // the game reads its switches at power-on
         case S_BLOOD: cycle(&cfg.blood, 4, d); break;
         case S_FINISH: cfg.finishing_moves = !cfg.finishing_moves; break;
@@ -1029,6 +1083,7 @@ static bool handle_events(void)
             else if (is_hotkey(sc, HK_TRAINING)) { cfg.training = !cfg.training; osd_message("Training mode %s", cfg.training ? "on" : "off"); }
             else if (is_hotkey(sc, HK_DUMMY_RECORD)) training_record_toggle();
             else if (is_hotkey(sc, HK_DUMMY_PLAY)) training_play_toggle();
+            else if (is_hotkey(sc, HK_PERF)) { cfg.perf_overlay = !cfg.perf_overlay; menu_changed = true; }
             else if (is_hotkey(sc, HK_INPUT_DISPLAY)) { cfg.input_display = !cfg.input_display; osd_message("Input display %s", cfg.input_display ? "on" : "off"); }
             else if (is_hotkey(sc, HK_VOL_UP)) set_volume(volume + 10);
             else if (is_hotkey(sc, HK_VOL_DOWN)) set_volume(volume - 10);
@@ -1044,6 +1099,7 @@ static bool handle_events(void)
 // rollback/rewind. Every emulated frame must end in a checkpoint.
 static void emulate_frame(void)
 {
+    uint64_t t0 = SDL_GetPerformanceCounter();
     uint32_t held[2];
     read_players(held);
     training_inputs(held);
@@ -1055,6 +1111,7 @@ static void emulate_frame(void)
     state_checkpoint();
     frame_count++;
     rumble_check();
+    perf_emu(t0);
 }
 
 // Show the frame `run_ahead` frames in the future (same inputs), then
@@ -1089,6 +1146,7 @@ static void np_reset(void)
     stop_audio();
     paused = step_once = false;
     machine_netplay_reset();
+    boot_difficulty = adjust_difficulty();
     ac.active = false;
     memset(inhist, 0, sizeof inhist);
 }
@@ -1188,6 +1246,7 @@ int frontend_main(void)
     int latency = cfg.audio_latency_ms > 10 ? cfg.audio_latency_ms : 10;
 
     if (opt_test_shaders) { int r = test_shaders(); video_close(); SDL_Quit(); return r; }
+    boot_difficulty = adjust_difficulty();
     apply_shader();
     netplay_set_callbacks(np_run, np_reset);
     if (opt_net_host) {
@@ -1207,7 +1266,9 @@ int frontend_main(void)
         if (netplay_running()) {
             // the game never pauses: both sides run at the original 58.96 Hz, timed by audio
             if (!was_netplay) { was_netplay = true; vsync = false; video_set_vsync(false); osd_message("Netplay: you are player %d", netplay_local_player() + 1); }
+            uint64_t t0 = SDL_GetPerformanceCounter();
             netplay_update(netplay_input());
+            perf_emu(t0);
             pump_audio(false, 1);
             present(netplay_status());
             if (adev) while (queued_ms() > latency) SDL_Delay(1);

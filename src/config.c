@@ -37,10 +37,11 @@ static const char *const hotkey_names[NHOTKEYS] = {
     "menu", "pause", "frame_advance", "fast_forward", "rewind", "save_state", "load_state", "next_slot",
     "fullscreen", "screenshot", "volume_up", "volume_down", "mute", "test", "service",
     "game_volume_up", "game_volume_down", "input_display", "training", "dummy_record", "dummy_play",
+    "performance",
 };
 static const char *const hotkey_defaults[NHOTKEYS] = {
     "F1", "P", ".", "Tab", "Backspace", "F5", "F7", "F6",
-    "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown", "F3", "F4", "F8", "F9",
+    "F11", "F12", "=", "-", "M", "F2", "9", "PageUp", "PageDown", "F3", "F4", "F8", "F9", "F10",
 };
 
 #define MAX_OPTS 256
@@ -65,6 +66,7 @@ static void build_table(void)
     add("video", "fullscreen_exclusive", T_BOOL, &cfg.fullscreen_exclusive, "no", "exclusive fullscreen (sets the display mode) instead of borderless", 0);
     add("video", "fullscreen_mode", T_STR, cfg.fullscreen_mode, "", "display mode for exclusive fullscreen, e.g. 1920x1080@60; empty = current", 0);
     add("video", "window_scale", T_INT, &cfg.window_scale, "3", "initial window size as a multiple of 320x240", 0);
+    add("video", "performance_overlay", T_BOOL, &cfg.perf_overlay, "no", "show frame rate, emulation speed and audio buffer", 0);
     add("video", "window_x", T_INT, &cfg.window_x, "0", "last window position and size (remembered on exit)", 0);
     add("video", "window_y", T_INT, &cfg.window_y, "0", 0, 0);
     add("video", "window_w", T_INT, &cfg.window_w, "0", 0, 0);

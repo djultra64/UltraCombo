@@ -67,6 +67,7 @@ The first pad connected is player 1, the second player 2.
 | F3 | Input display |
 | F4 | Training mode |
 | F8 / F9 | Record / play the training dummy |
+| F10 | Performance overlay |
 | = / - / M | Volume up / down / mute |
 | F2 | Operator test menu |
 | 9 | Service credit |
@@ -108,7 +109,11 @@ right together count as neither, up and down together as up, like fight
 sticks), **rumble** when your character is hit, and the stick deadzone.
 
 Game & system has volume, mute/pause while the window is in the background,
-the DIP switch settings, auto-coin, run-ahead and rewind. The window's size
+the **CPU difficulty** (Extra easy to Extra hard; written to the disk's
+adjustments exactly as the operator menu does, so it applies after Reset),
+the DIP switch settings, auto-coin, run-ahead and rewind. F10 (or
+Graphics → Performance overlay) shows frame rate, emulation time and speed,
+and the audio buffer. The window's size
 and position are remembered between runs.
 
 ## Training mode

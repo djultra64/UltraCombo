@@ -12,7 +12,8 @@ enum {
 
 enum { HK_MENU, HK_PAUSE, HK_STEP, HK_FAST, HK_REWIND, HK_SAVE_STATE, HK_LOAD_STATE, HK_NEXT_SLOT,
        HK_FULLSCREEN, HK_SCREENSHOT, HK_VOL_UP, HK_VOL_DOWN, HK_MUTE, HK_TEST, HK_SERVICE,
-       HK_GAME_VOL_UP, HK_GAME_VOL_DOWN, HK_INPUT_DISPLAY, HK_TRAINING, HK_DUMMY_RECORD, HK_DUMMY_PLAY, NHOTKEYS };
+       HK_GAME_VOL_UP, HK_GAME_VOL_DOWN, HK_INPUT_DISPLAY, HK_TRAINING, HK_DUMMY_RECORD, HK_DUMMY_PLAY,
+       HK_PERF, NHOTKEYS };
 
 enum { SCALE_FIT, SCALE_INTEGER, SCALE_STRETCH };
 enum { PACING_AUTO, PACING_AUDIO, PACING_VSYNC };
@@ -47,6 +48,7 @@ typedef struct {
     int  rewind_mb;            // memory for the rewind history
     int  state_slot;           // 1-9
     bool input_display;
+    bool perf_overlay;
     bool training;             // health refill + timer freeze
     // the board's DIP switches
     bool free_play;

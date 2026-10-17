@@ -51,7 +51,20 @@ static uint64_t echo_time;           // the peer's last timestamp, sent back to 
 static bool     got_input;           // the peer's first input packet has arrived
 
 static uint8_t disk_buf[IDE_TRACK_BYTES];
+static uint8_t own_disk[IDE_TRACK_BYTES];   // guest: its own settings, put back after the session
+static bool own_disk_saved;
 static uint32_t host_dsw;
+
+// The guest plays on the host's settings sectors; afterwards its own come back
+// (they reach the disk image file on the next flush).
+static void restore_own_disk(void)
+{
+    if (!own_disk_saved) return;
+    memcpy(ide_tracked(), own_disk, IDE_TRACK_BYTES);
+    ide_tracked_changed();
+    for (int i = 0; i < IDE_TRACK_PAGES; i++) ide_dirty[i] = 1;
+    own_disk_saved = false;
+}
 static uint32_t disk_have;           // guest: bitmask of 1 KB chunks received
 
 static uint32_t end_frame = ~0u;
@@ -87,6 +100,7 @@ static void fail_reason(const char *msg, int reason)
     state = NP_OFF;
     net_close();
     status[0] = 0;
+    restore_own_disk();
 }
 
 static void fail(const char *msg) { fail_reason(msg, 0); }
@@ -96,6 +110,7 @@ void netplay_stop(void)
     if (state == NP_OFF) return;
     if (state != NP_HOSTING) send_quit(0);
     state = NP_OFF;
+    restore_own_disk();
     net_close();
     status[0] = 0;
 }
@@ -161,7 +176,13 @@ bool netplay_join(const char *hostname, int port, int input_delay)
 static void begin_session(void)
 {
     // both sides: same disk settings, power-cycle, same boot frames
-    if (!host) { memcpy(ide_tracked(), disk_buf, IDE_TRACK_BYTES); ide_tracked_changed(); hw.dsw = host_dsw; }
+    if (!host) {
+        memcpy(own_disk, ide_tracked(), IDE_TRACK_BYTES);
+        own_disk_saved = true;
+        memcpy(ide_tracked(), disk_buf, IDE_TRACK_BYTES);
+        ide_tracked_changed();
+        hw.dsw = host_dsw;
+    }
     reset_cb();
     state_set_history((size_t)64 << 20);
     frame = NP_BOOT_FRAMES;
@@ -391,7 +412,6 @@ static void handle_packet(const uint8_t *b, int n, const net_addr_t *from)
         if (state == NP_OFF) return;
         if (!r.bad && reason == 1) fail_reason("desync - the games no longer match", 1);
         else fail("the other player left");
-        state = NP_OFF;
         return;
     }
     }
