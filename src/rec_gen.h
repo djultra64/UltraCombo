@@ -2,6 +2,28 @@
 #pragma once
 #include "rec.h"
 
+#if defined(__TINYC__)
+// TinyCC (used to build the translated code on the player's machine) has
+// neither gcc's overflow builtins nor 128-bit integers.
+static int rec_add_ov(int32_t a, int32_t b, int32_t *r) { int64_t s = (int64_t)a + b; *r = (int32_t)s; return s != *r; }
+static int rec_sub_ov(int32_t a, int32_t b, int32_t *r) { int64_t s = (int64_t)a - b; *r = (int32_t)s; return s != *r; }
+#define __builtin_add_overflow(a, b, r) rec_add_ov((a), (b), (r))
+#define __builtin_sub_overflow(a, b, r) rec_sub_ov((a), (b), (r))
+static void rec_mul64(uint64_t a, uint64_t b, uint64_t *hi, uint64_t *lo)
+{
+    uint64_t al = (uint32_t)a, ah = a >> 32, bl = (uint32_t)b, bh = b >> 32;
+    uint64_t ll = al * bl, lh = al * bh, hl = ah * bl, hh = ah * bh;
+    uint64_t mid = (ll >> 32) + (uint32_t)lh + (uint32_t)hl;
+    *lo = (mid << 32) | (uint32_t)ll;
+    *hi = hh + (lh >> 32) + (hl >> 32) + (mid >> 32);
+}
+#define REC_LOAD(T, v, p) ((v) = *(const T *)(p))
+#define REC_STORE(T, p, v) (*(T *)(p) = (v))
+#else
+#define REC_LOAD(T, v, p) memcpy(&(v), (p), sizeof(T))
+#define REC_STORE(T, p, v) memcpy((p), &(v), sizeof(T))
+#endif
+
 #define R cpu.r
 #define SX32(x) ((uint64_t)(int64_t)(int32_t)(x))
 #define EXIT(t) do { cpu.pc = (t); cpu.npc = (t) + 4; return; } while (0)
@@ -31,6 +53,15 @@ static inline void rec_divu(uint64_t rs, uint64_t rt)
     if (b == 0) { cpu.lo = SX32(0xffffffffu); cpu.hi = SX32(a); }
     else { cpu.lo = SX32(a / b); cpu.hi = SX32(a % b); }
 }
+#if defined(__TINYC__)
+static inline void rec_dmultu(uint64_t rs, uint64_t rt) { rec_mul64(rs, rt, &cpu.hi, &cpu.lo); }
+static inline void rec_dmult(uint64_t rs, uint64_t rt)
+{
+    rec_mul64(rs, rt, &cpu.hi, &cpu.lo);                  // signed: correct the high half
+    if ((int64_t)rs < 0) cpu.hi -= rt;
+    if ((int64_t)rt < 0) cpu.hi -= rs;
+}
+#else
 static inline void rec_dmult(uint64_t rs, uint64_t rt)
 {
     __int128 p = (__int128)(int64_t)rs * (int64_t)rt;
@@ -41,6 +72,7 @@ static inline void rec_dmultu(uint64_t rs, uint64_t rt)
     unsigned __int128 p = (unsigned __int128)rs * rt;
     cpu.lo = (uint64_t)p; cpu.hi = (uint64_t)(p >> 64);
 }
+#endif
 static inline void rec_ddiv(uint64_t rs, uint64_t rt)
 {
     int64_t a = (int64_t)rs, b = (int64_t)rt;
@@ -54,16 +86,34 @@ static inline void rec_ddivu(uint64_t rs, uint64_t rt)
     else { cpu.lo = rs / rt; cpu.hi = rs % rt; }
 }
 
+#if defined(__TINYC__)
+// TinyCC never inlines, so the RAM fast path is spelled out here
+// (ram0 and ram2 are contiguous in `ram`).
+#define REC_PA(a) ((a) & 0x1fffffffu)
+#define rec_ld_ptr_(a) (((a) & 0xc0000000u) != 0x80000000u ? rec_tlbc((a), false) :           \
+        REC_PA(a) < RAM0_SIZE ? ram + REC_PA(a) :                                               \
+        REC_PA(a) - 0x08000000u < RAM2_SIZE ? ram + RAM0_SIZE + (REC_PA(a) - 0x08000000u) : (uint8_t *)0)
+#define rec_st_ptr_(a) (((a) & 0xc0000000u) != 0x80000000u ? rec_tlbc((a), true) :            \
+        REC_PA(a) < RAM0_SIZE ? ram + REC_PA(a) :                                               \
+        REC_PA(a) - rec_code_lo < rec_code_size ? (uint8_t *)0 :                                \
+        REC_PA(a) - 0x08000000u < RAM2_SIZE ? ram + RAM0_SIZE + (REC_PA(a) - 0x08000000u) : (uint8_t *)0)
+#define ram_touch_(p) (ram_dirty[(size_t)((p) - ram) >> 12] = 1)
+#else
+#define rec_ld_ptr_ rec_ld_ptr
+#define rec_st_ptr_ rec_st_ptr
+#define ram_touch_ ram_touch
+#endif
+
 // Loads and stores: inline fast path for KSEG0/1 RAM, helper otherwise.
 #define LD(T, dst, va, size, PC, DL) do {                                   \
-        uint32_t _a = (va); uint8_t *_p = rec_ld_ptr(_a); T _v;              \
-        if (_p && !(_a & (size - 1))) memcpy(&_v, _p, size);                 \
+        uint32_t _a = (va); uint8_t *_p = rec_ld_ptr_(_a); T _v;             \
+        if (_p && !(_a & (size - 1))) REC_LOAD(T, _v, _p);                    \
         else { _v = (T)rec_load(_a, size, PC, DL); if (cpu_exc) return; }    \
         dst;                                                                 \
     } while (0)
 #define ST(T, val, va, size, PC, DL) do {                                   \
-        uint32_t _a = (va); uint8_t *_p = rec_st_ptr(_a); T _v = (T)(val);   \
-        if (_p && !(_a & (size - 1))) { memcpy(_p, &_v, size); ram_touch(_p); } \
+        uint32_t _a = (va); uint8_t *_p = rec_st_ptr_(_a); T _v = (T)(val);  \
+        if (_p && !(_a & (size - 1))) { REC_STORE(T, _p, _v); ram_touch_(_p); } \
         else { rec_store(_a, (uint64_t)_v, size, PC, DL); if (cpu_exc) return; } \
     } while (0)
 
