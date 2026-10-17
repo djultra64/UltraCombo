@@ -45,6 +45,11 @@ static void run_frame(void)
             int slice = remaining < 256 ? remaining : 256;
             cpu_run((uint64_t)slice);
             ide_tick(slice);
+            // DCS runs at 10 MHz against the 100 MHz R4600
+            static int sound_acc;
+            sound_acc += slice;
+            sound_run(sound_acc / 10);
+            sound_acc %= 10;
             remaining -= slice;
         }
     }
@@ -73,6 +78,33 @@ static void save_ppm(const char *path)
         fwrite(c, 1, 3, f);
     }
     fclose(f);
+}
+
+#define AUDIO_HZ 48000
+
+// Resample DCS output (usually 31.25 kHz) to the device rate and queue it.
+static void pump_audio(SDL_AudioDeviceID dev)
+{
+    static int16_t in[8192], out[16384];
+    static double pos;      // fractional read position into the previous+current block
+    static int16_t prev;
+    int n = sound_fetch(in, 8192);
+    if (!dev) return;
+    double step = sound_rate() / AUDIO_HZ;
+    int m = 0;
+    while (pos < n && m < 16384) {
+        int i = (int)pos;
+        double f = pos - i;
+        int16_t a = i == 0 ? prev : in[i - 1];
+        int16_t b = in[i];
+        out[m++] = (int16_t)(a + (b - a) * f);
+        pos += step;
+    }
+    pos -= n;
+    if (n) prev = in[n - 1];
+    // keep latency bounded: drop audio if more than ~120 ms is queued
+    if (SDL_GetQueuedAudioSize(dev) < AUDIO_HZ * 2 * 120 / 1000)
+        SDL_QueueAudio(dev, out, (Uint32)m * 2);
 }
 
 typedef struct { SDL_Scancode key; uint32_t *port; uint32_t bit; } keymap_t;
@@ -142,12 +174,26 @@ int main(int argc, char **argv)
     }
     // KI2 drive geometry from the CHD metadata; serial lives at identify word 11
     if (!ide_open(disk_path, 1463, 13, 47, 11)) return 1;
+    static char snd_buf[4096];
+    if (!strcmp(sound_dir, ".")) {
+        // locate the sound ROMs the same way as the boot ROM
+        const char *u10 = find_data("ki2_l1.u10", argv[0], snd_buf, sizeof snd_buf);
+        const char *slash = strrchr(u10, '/');
+        if (slash) { snd_buf[slash - u10] = 0; if (u10 != snd_buf) { memmove(snd_buf, u10, slash - u10); snd_buf[slash - u10] = 0; } sound_dir = snd_buf; }
+    }
     sound_init(sound_dir);
     cpu_reset();
 
     if (headless) {
+        FILE *wav = getenv("KI2_WAV") ? fopen(getenv("KI2_WAV"), "wb") : NULL;
+        uint32_t wav_samples = 0;
+        if (wav) fseek(wav, 44, SEEK_SET);
         for (int f = 1; f <= headless; f++) {
             run_frame();
+            if (wav) {
+                int16_t buf[4096]; int n;
+                while ((n = sound_fetch(buf, 4096)) > 0) { fwrite(buf, 2, (size_t)n, wav); wav_samples += (uint32_t)n; }
+            }
             if (shot_every && f % shot_every == 0) {
                 char name[64];
                 snprintf(name, sizeof name, "frame_%05d.ppm", f);
@@ -156,6 +202,19 @@ int main(int argc, char **argv)
             }
         }
         save_ppm("frame_last.ppm");
+        if (wav) {
+            uint32_t rate = (uint32_t)sound_rate(), bytes = wav_samples * 2;
+            uint8_t h[44] = "RIFF____WAVEfmt ";
+            uint32_t v;
+            v = 36 + bytes; memcpy(h + 4, &v, 4);
+            v = 16; memcpy(h + 16, &v, 4);
+            uint16_t w = 1; memcpy(h + 20, &w, 2); memcpy(h + 22, &w, 2);
+            memcpy(h + 24, &rate, 4); v = rate * 2; memcpy(h + 28, &v, 4);
+            w = 2; memcpy(h + 32, &w, 2); w = 16; memcpy(h + 34, &w, 2);
+            memcpy(h + 36, "data", 4); memcpy(h + 40, &bytes, 4);
+            fseek(wav, 0, SEEK_SET); fwrite(h, 1, 44, wav); fclose(wav);
+            fprintf(stderr, "wrote %u samples at %u Hz\n", wav_samples, rate);
+        }
         return 0;
     }
 
@@ -165,6 +224,10 @@ int main(int argc, char **argv)
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     SDL_RenderSetLogicalSize(ren, 320, 240);
     SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 240);
+    SDL_AudioSpec want = { .freq = AUDIO_HZ, .format = AUDIO_S16SYS, .channels = 1, .samples = 1024 }, have;
+    SDL_AudioDeviceID adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (!adev) fprintf(stderr, "audio: %s\n", SDL_GetError());
+    else SDL_PauseAudioDevice(adev, 0);
 
     static uint32_t px[320 * 240];
     uint64_t freq = SDL_GetPerformanceFrequency();
@@ -182,6 +245,7 @@ int main(int argc, char **argv)
             if (ks[keys[i].key]) *keys[i].port &= ~keys[i].bit;
 
         run_frame();
+        pump_audio(adev);
         to_rgb(px);
         SDL_UpdateTexture(tex, NULL, px, 320 * 4);
         SDL_RenderClear(ren);
