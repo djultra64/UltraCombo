@@ -321,12 +321,12 @@ static const char *files_help(void)
     else
         snprintf(where, sizeof where, "\n    %srun", data_dir());
     snprintf(buf, sizeof buf,
-             "Put the game files in %s\n(or set their paths in ki2.ini).\n\n"
+             "Put the game files in %s\n(or set their paths in %s.ini).\n\n"
              "Needed (%s):\n"
              "  %s  - boot ROM\n"
              "  %s  - hard disk, extracted from MAME's %s with\n"
              "      chdman extractraw -i %s -o %s\n"
-             "  %s - %s, %s - %s  - sound ROMs", where, game.title,
+             "  %s - %s, %s - %s  - sound ROMs", where, game.id, game.title,
              game.versions[0].rom, game.disk, game.chd, game.chd, game.disk,
              game.sound_roms[0], game.sound_roms[3], game.sound_roms[4], game.sound_roms[7]);
     return buf;
@@ -347,14 +347,14 @@ static void usage(void)
         "  --load P        start from state file P\n"
         "  --rewind-test N headless: every N frames rewind N, replay, and check the state matches\n"
         "  --runahead N    headless: run N frames ahead and roll back after each frame\n"
-        "  --host [PORT]   host a netplay game (default port from ki2.ini, 7845)\n"
+        "  --host [PORT]   host a netplay game (default port from %s.ini, 7845)\n"
         "  --join HOST[:PORT]  join a netplay game\n"
         "  --net-host PORT / --net-join HOST:PORT\n"
         "                  headless netplay test: play this side of --script until frame N\n"
         "  --net-delay N, --net-fps F, --net-sim LATENCY:JITTER:LOSS%%  (testing)\n"
-        "Settings, key bindings and hotkeys are in ki2.ini beside the executable\n"
+        "Settings, key bindings and hotkeys are in %s.ini beside the executable\n"
         "(written with defaults on first run). See README.md.\n",
-        game.file_name, game.versions[0].rom, game.chd, game.sound_roms[0]);
+        game.file_name, game.versions[0].rom, game.chd, game.sound_roms[0], game.id, game.id);
 }
 
 int main(int argc, char **argv)
@@ -368,12 +368,12 @@ int main(int argc, char **argv)
 #ifdef _WIN32
     {   // a GUI program has no console: keep the log beside the executable
         static char log[4096];
-        snprintf(log, sizeof log, "%ski2.log", data_dir());
+        snprintf(log, sizeof log, "%s%s.log", data_dir(), game.id);
         if (!getenv("KI2_CONSOLE")) { freopen(log, "w", stderr); setvbuf(stderr, NULL, _IONBF, 0); }
     }
 #endif
     static char ini[4096];
-    snprintf(ini, sizeof ini, "%ski2.ini", data_dir());
+    snprintf(ini, sizeof ini, "%s%s.ini", data_dir(), game.id);
     config_load(ini);
     const char *rom_path = *cfg.rom ? cfg.rom : game.versions[0].rom;
     const char *disk_path = *cfg.disk ? cfg.disk : game.disk;

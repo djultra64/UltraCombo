@@ -1,7 +1,8 @@
-# UltraCombo 2
+# UltraCombo
 
-Native port for the Killer Instinct 2 arcade game (C11 + SDL2 + OpenGL), for
-Linux and Windows. It runs the game's own MIPS code, statically translated to
+Native ports for the Killer Instinct arcade games (C11 + SDL2 + OpenGL), for
+Linux and Windows: **UltraCombo** (Killer Instinct) and **UltraCombo 2**
+(Killer Instinct 2), built from one codebase. It runs the game's own MIPS code, statically translated to
 C, with the hardware around it emulated. Players supply their own game files.
 README.md is the user manual; this file is for working on the code.
 
@@ -21,13 +22,14 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
   code and test output. Add files by name and read `git status` first.
 - Commit as `thefixinhixon <132857351+thefixinhixon@users.noreply.github.com>`
   (set in the repo's git config). Never commit a personal email.
-- Name the product UltraCombo 2. Use "Killer Instinct 2" only to say what it
-  plays, never as the product's name. It is a trademark.
+- Name the products UltraCombo and UltraCombo 2. Use "Killer Instinct" only to
+  say what they play, never as a product's name. It is a trademark.
 
 ## Layout
 
 | Area | Files |
 |---|---|
+| **What differs per game**: names, files, disk geometry, I/O port addresses, RAM locations, icon text | `game.h`, `game_ki1.c`, `game_ki2.c` (each program links one) |
 | CPU: MIPS R4600 interpreter, TLB, exceptions | `cpu.c/h`, `disasm.c` |
 | Memory map and I/O | `mem.c/h`, `machine.h` |
 | IDE disk (settings sectors journaled in memory) | `ide.c/h` |
@@ -43,6 +45,15 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
 | Game-setting tweaks, e.g. CPU difficulty | `adjust.c/h` |
 | Icon (drawn in code) and PNG writer | `icon.c/h`, `png.c/h`, `ki2.rc` |
 | Program entry, CLI, `data_dir()`/`base_dir()`/`find_data()` | `main.c` |
+
+## Two games
+
+Both games run on the same board (MAME's `kinst` driver), so there is one
+emulator. Anything game-specific goes in the profile (`game.h`), never as a
+constant in shared code. A feature that needs a RAM location the profile
+doesn't know yet (0) must turn itself off. Per-game files are named after
+`game.id`: `ki1.ini` / `ki2.ini`, `.log`, `slotN.ki1s` / `.ki2s`, screenshots.
+Changes to shared code must keep UltraCombo 2's regression hashes.
 
 ## Determinism (netplay, rewind and run-ahead depend on it)
 
@@ -91,7 +102,7 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
 
 Build and run (needs gcc, SDL2, python3; game files in `run/`):
 
-    make                 # ultracombo2: builds the game code at first launch
+    make                 # ultracombo2 (KI2) and ultracombo (KI1); game code is built at first launch
     make recomp          # developer build with the game code linked in (never share it)
     ./ultracombo2
 

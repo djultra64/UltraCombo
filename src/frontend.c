@@ -178,12 +178,12 @@ static void screenshot(void)
     time_t t = time(NULL);
     char stamp[32];
     strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", localtime(&t));
-    snprintf(path, sizeof path, "%s/ki2_%s.png", dir, stamp);
+    snprintf(path, sizeof path, "%s/%s_%s.png", dir, game.id, stamp);
     for (int i = 2; i < 100; i++) {         // several in one second
         FILE *f = fopen(path, "rb");
         if (!f) break;
         fclose(f);
-        snprintf(path, sizeof path, "%s/ki2_%s_%d.png", dir, stamp, i);
+        snprintf(path, sizeof path, "%s/%s_%s_%d.png", dir, game.id, stamp, i);
     }
     to_rgb(px);
     if (png_write(path, px, 320, 240)) { osd_message("Screenshot saved"); fprintf(stderr, "screenshot: %s\n", path); }
@@ -416,7 +416,7 @@ static void slot_path(char *buf, size_t n, int s)
     char dir[4096];
     snprintf(dir, sizeof dir, "%sstates", data_dir());
     make_dir(dir);
-    snprintf(buf, n, "%s/slot%d.ki2s", dir, s);
+    snprintf(buf, n, "%s/slot%d.%ss", dir, s, game.id);
 }
 
 static void save_state(void)
@@ -589,7 +589,7 @@ static void draw_menu(uint32_t *out)
     const char *items[96];
     int n = page_count();
     if (n > 96) n = 96;
-    const char *title = "KILLER INSTINCT 2", *foot = "ENTER/A SELECT   ESC/B BACK";
+    const char *title = game.product, *foot = "ENTER/A SELECT   ESC/B BACK";   // the font draws capitals
     static const char *const onoff[2] = { "Off", "On" };
     char lbl[80];
 
@@ -1176,7 +1176,7 @@ static bool apply_shader(void)
     snprintf(path, sizeof path, "%s%s", base_dir(), cfg.shader);
     if (!video_set_shader(path, err, sizeof err)) {
         fprintf(stderr, "shader: %s\n", err);
-        osd_message("Shader failed to load (see ki2.log)");
+        osd_message("Shader failed to load (see %s.log)", game.id);
         return false;
     }
     shader_params_apply(cfg.shader_params);
@@ -1238,7 +1238,7 @@ static void prepare_game_code(void)
     osd_message("%s", ok ? "Ready" : "Running without translated code (slower)");
     if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, game.product,
         "The game code could not be prepared for full speed on this PC, so the game runs on the "
-        "slower interpreter. ki2.log and cache/*/build.log in the game folder say why.", win);
+        "slower interpreter. The .log file and cache/*/build.log in the game folder say why.", win);
 }
 
 /* ---------------------------------------------------------------- */
