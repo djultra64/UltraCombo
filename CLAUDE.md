@@ -2,7 +2,7 @@
 
 Native ports for the Killer Instinct arcade games (C11 + SDL2 + OpenGL), for
 Linux and Windows: **UltraCombo** (Killer Instinct) and **UltraCombo 2**
-(Killer Instinct 2), built from one codebase. It runs the game's own MIPS code, statically translated to
+(Killer Instinct 2), both in one program that asks which to play. It runs the game's own MIPS code, statically translated to
 C, with the hardware around it emulated. Players supply their own game files.
 README.md is the user manual; this file is for working on the code.
 
@@ -29,7 +29,7 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
 
 | Area | Files |
 |---|---|
-| **What differs per game**: names, files, disk geometry, I/O port addresses, RAM locations, icon text | `game.h`, `game_ki1.c`, `game_ki2.c` (each program links one) |
+| **What differs per game**: names, files, disk geometry, I/O port addresses, RAM locations, icon text | `game.h`, `game.c`, `game_ki1.c`, `game_ki2.c`; the startup choice and picker: `main.c` (`choose_game`), `picker.c` |
 | CPU: MIPS R4600 interpreter, TLB, exceptions | `cpu.c/h`, `disasm.c` |
 | Memory map and I/O | `mem.c/h`, `machine.h` |
 | IDE disk: raw image or MAME CHD (read-only, via libchdr), settings sectors in memory and in `saves/<boot ROM>.settings` | `ide.c/h`, `third_party/libchdr/` |
@@ -49,8 +49,11 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
 ## Two games
 
 Both games run on the same board (MAME's `kinst` driver), so there is one
-emulator. Anything game-specific goes in the profile (`game.h`), never as a
-constant in shared code. A feature that needs a RAM location the profile
+emulator and one program. The profile (`game.h`) is chosen at the top of
+`main()` (`--game`, the only game installed, or the picker) before anything
+reads `game`; Menu > Change game restarts the program into the picker.
+Translated code records its game, so modules never cross over. Anything
+game-specific goes in the profile, never as a constant in shared code. A feature that needs a RAM location the profile
 doesn't know yet (0) must turn itself off. Per-game files are named after
 `game.id`: `ki1.ini` / `ki2.ini`, `.log`, `slotN.ki1s` / `.ki2s`, screenshots.
 Changes to shared code must keep UltraCombo 2's regression hashes.
@@ -113,9 +116,9 @@ MAME's CRC32s and CHD SHA1, and the files are checked at startup.
 
 Build and run (needs gcc, SDL2, python3; game files in `run/`):
 
-    make                 # ultracombo2 (KI2) and ultracombo (KI1); game code is built at first launch
+    make                 # ultracombo, both games; game code is built at first launch per game
     make recomp          # developer build with the game code linked in (never share it)
-    ./ultracombo2
+    ./ultracombo
 
 Regression test: a fixed 4400-frame boot, coin-up and two-player fight,
 printing a state hash:
@@ -137,7 +140,7 @@ Useful environment variables:
 
 Packages (no game files, no game code):
 
-    make packages        # dist/UltraCombo2-Windows.zip, -Linux.tar.xz, -x86_64.AppImage
+    make packages        # dist/UltraCombo-Windows.zip, -Linux.tar.xz, -x86_64.AppImage
 
 These need, in `deps/`:
 - Zig 0.17 for Linux and Windows;
