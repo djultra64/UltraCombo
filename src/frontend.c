@@ -478,7 +478,7 @@ static int versions_there(void)
     return n;
 }
 
-enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
+enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_CHANGE, M_QUIT, M_COUNT };
 // Graphics
 enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 // Controls
@@ -585,6 +585,7 @@ static void apply_fullscreen_mode(void)
 // Rows that don't apply to this game.
 static bool row_hidden(int row)
 {
+    if (menu_page == PG_MAIN) return row == M_CHANGE && !machine_both_installed();
     if (menu_page != PG_GAME) return false;
     if (row == S_AUTOCOIN) return !game.credits;
     if (row == S_BLOODCOL) return !game.has_blood_colour;
@@ -639,6 +640,7 @@ static void draw_menu(uint32_t *out)
         snprintf(b[M_PRACTICE], 72, "Practice...\t%s", cfg.training ? "training on" : "");
         snprintf(b[M_NETPLAY], 72, "Netplay...\t%s", in_netplay() ? "playing" : netplay_active() ? "connecting" : "");
         snprintf(b[M_RESET], 72, "Reset game");
+        snprintf(b[M_CHANGE], 72, "Change game...");
         snprintf(b[M_QUIT], 72, "Quit");
         foot = "ENTER/A SELECT   ESC/B CLOSE";
         break;
@@ -828,6 +830,12 @@ static void menu_change(int dir)
             hard_reset();
             menu_close();
             osd_message("Reset");
+            return;
+        case M_CHANGE:
+            if (dir) return;
+            if (in_netplay()) { not_in_netplay(); return; }
+            menu_close();
+            machine_restart_to_picker();
             return;
         case M_QUIT: if (!dir) quit_requested = true; return;
         }

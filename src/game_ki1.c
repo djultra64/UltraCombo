@@ -2,11 +2,10 @@
 // 0, which turns the features using them off.
 #include "game.h"
 
-const game_t game = {
+const game_t game_ki1 = {
     .id = "ki1",
     .title = "Killer Instinct",
     .product = "UltraCombo",
-    .file_name = "UltraCombo",
     .icon_text = "UC",
 
     .versions = { { "1.5d", "ki-l15d.u98", 0x7b65ca3d }, { "1.4", "ki-l14.u98", 0xafedb75f } },

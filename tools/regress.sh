@@ -6,7 +6,7 @@
 #
 #   tools/regress.sh [-g ki1|ki2] PROGRAM DISK_HEAD [RUN_DIR] [WORK_DIR]
 #
-# -g: which game's files and inputs to use (default ki2; must match PROGRAM).
+# -g: which game to run, with its files and inputs (default ki2).
 # DISK_HEAD: the game's settings sectors (32 KB) saved earlier; the hash
 # depends on them. They are written to a settings file in WORK_DIR (default
 # $TMPDIR/uc-regress) before each run; the disk image is only read. RUN_DIR
@@ -32,5 +32,5 @@ export KI2_DSW=${KI2_DSW:-fffff1ff}     # blood high, demo sounds, finishing mov
 mkdir -p "$work"
 cp "$head" "$work/$game.settings"
 cd "$work"
-"$prog" --rom "$run/$rom" --sound "$run" --disk "$image" --settings "$work/$game.settings" \
+"$prog" --game $game --rom "$run/$rom" --sound "$run" --disk "$image" --settings "$work/$game.settings" \
     --headless 4400 --script "$(cat "$inputs")" 2>&1 | grep -E '^(rec:|state hash|These files)'

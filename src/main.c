@@ -14,7 +14,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #define make_dir(p) _mkdir(p)
@@ -26,6 +33,7 @@
 #include "rec_build.h"
 #include "game.h"
 #include "training.h"
+#include "picker.h"
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -107,7 +115,7 @@ const char *data_dir(void)
         struct stat st;
         if (!stat(run, &st) && S_ISDIR(st.st_mode) && writable_dir(ai)) { dir = SDL_strdup(ai); return dir; }
     }
-    dir = SDL_GetPrefPath("", game.file_name);
+    dir = SDL_GetPrefPath("", PRODUCT);          // one folder for both games: their files have their own names
     if (!dir) dir = SDL_strdup(base_dir());
     return dir;
 }
@@ -456,7 +464,9 @@ static const char *files_help(void)
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: %s [options]\n"
+        "usage: ultracombo [options]\n"
+        "  --game ki1|ki2  Killer Instinct or Killer Instinct 2 (default: a picker\n"
+        "                  when both are installed); the options below are for %s\n"
         "  --rom PATH      boot ROM (%s)\n"
         "  --disk PATH     disk image: MAME's %s, or a raw image extracted from it\n"
         "  --settings PATH file for the game's settings and high scores (default: saves/)\n"
@@ -478,16 +488,104 @@ static void usage(void)
         "  --net-delay N, --net-fps F, --net-sim LATENCY:JITTER:LOSS%%  (testing)\n"
         "Settings, key bindings and hotkeys are in %s.ini beside the executable\n"
         "(written with defaults on first run). See README.md.\n",
-        game.file_name, game.versions[0].rom, game.chd, game.sound_roms[0], game.id, game.id);
+        game.title, game.versions[0].rom, game.chd, game.sound_roms[0], game.id, game.id);
+}
+
+static int main_argc;
+static char **main_argv;
+
+// A game counts as installed when a boot ROM of one of its versions is there.
+static bool installed(const game_t *g)
+{
+    char buf[4096];
+    for (int v = 0; v < 4 && g->versions[v].label; v++)
+        if (readable(find_data(g->versions[v].rom, buf, sizeof buf))) return true;
+    return false;
+}
+
+bool picker_version_there(const game_t *g, int v)
+{
+    char buf[4096];
+    return readable(find_data(g->versions[v].rom, buf, sizeof buf));
+}
+
+bool machine_both_installed(void)
+{
+    static int both = -1;                // files don't come and go while it runs
+    if (both < 0) both = installed(&game_ki1) && installed(&game_ki2);
+    return both;
+}
+
+// Which game to run: --game, else the only one installed, else the picker
+// (headless: the one used last). False: quit.
+static bool choose_game(const char *want, bool headless)
+{
+    char last_path[4200], last[16] = "";
+    snprintf(last_path, sizeof last_path, "%slast_game.txt", data_dir());
+    FILE *f = fopen(last_path, "r");
+    if (f) { if (!fgets(last, sizeof last, f)) last[0] = 0; fclose(f); last[strcspn(last, "\r\n")] = 0; }
+    const game_t *g = NULL;
+    if (want) {
+        g = game_find(want);
+        if (!g) { fprintf(stderr, "--game %s: unknown (ki1 or ki2)\n", want); return false; }
+    } else {
+        bool have[2] = { installed(&game_ki1), installed(&game_ki2) };
+        const game_t *const both[2] = { &game_ki1, &game_ki2 };
+        int lasti = game_find(last) == &game_ki1 ? 0 : 1;
+        if (have[0] != have[1]) g = have[0] ? &game_ki1 : &game_ki2;
+        else if (!have[0] || headless) g = both[lasti];       // none: its error explains what's missing
+        else if (!(g = picker_choose(both, have, lasti))) return false;
+    }
+    game_select(g);
+    if (!headless && (f = fopen(last_path, "w"))) { fprintf(f, "%s\n", g->id); fclose(f); }
+    return true;
+}
+
+// Back to the picker: save, then start the program again without --game.
+void machine_restart_to_picker(void)
+{
+    config_save();
+    ide_flush();
+    char *args[64];
+    int n = 0;
+    for (int i = 0; i < main_argc && n < 63; i++) {
+        if (i > 0 && !strcmp(main_argv[i], "--game") && i + 1 < main_argc) { i++; continue; }
+        args[n++] = main_argv[i];
+    }
+    args[n] = NULL;
+#ifdef _WIN32
+    static char exe[4096];
+    GetModuleFileNameA(NULL, exe, sizeof exe);
+    _execv(exe, (const char *const *)args);
+#else
+    static char exe[4096];                  // the real path, so the process keeps its name
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    exe[len > 0 ? len : 0] = 0;
+    execv(len > 0 ? exe : "/proc/self/exe", args);
+#endif
+    fprintf(stderr, "could not restart: %s\n", strerror(errno));
 }
 
 int main(int argc, char **argv)
 {
+    main_argc = argc;
+    main_argv = argv;
+    game_select(&game_ki1);              // until one is chosen (the program's icon is UltraCombo's)
     // packaging helper: before anything writes a log or settings
     if (argc == 3 && !strcmp(argv[1], "--write-icon")) {
         size_t n = strlen(argv[2]);                     // .png: 256 pixels, else .ico
         bool png = n > 4 && !strcmp(argv[2] + n - 4, ".png");
         return (png ? icon_write_png(argv[2], 256) : icon_write_ico(argv[2])) ? 0 : 1;
+    }
+    {
+        const char *want = NULL;
+        bool tool = false;                   // headless runs and tools never show the picker
+        for (int i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "--game") && i + 1 < argc) want = argv[i + 1];
+            if (!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--recomp") || !strcmp(argv[i], "--dis") ||
+                !strcmp(argv[i], "--write-raw") || !strcmp(argv[i], "--test-shaders")) tool = true;
+        }
+        if (!choose_game(want, tool)) return 0;
     }
 #ifdef _WIN32
     {   // a GUI program has no console: keep the log beside the executable
@@ -514,6 +612,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_path = argv[++i];
         else if (!strcmp(argv[i], "--game-version") && i + 1 < argc) want_version = argv[++i];
+        else if (!strcmp(argv[i], "--game") && i + 1 < argc) i++;            // chosen before the settings
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk_path = argv[++i];
         else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settings_path = argv[++i];
         else if (!strcmp(argv[i], "--write-raw") && i + 1 < argc) write_raw = argv[++i];

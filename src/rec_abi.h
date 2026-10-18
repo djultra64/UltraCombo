@@ -31,7 +31,7 @@ typedef __SIZE_TYPE__ size_t;
 #endif
 
 // Bumped whenever anything below (or what modules expect of the program) changes.
-#define REC_ABI_VERSION 1
+#define REC_ABI_VERSION 2
 
 #define RAM0_SIZE 0x80000u     // phys 0x00000000: 512 KB (holds the framebuffers)
 #define RAM2_SIZE 0x800000u    // phys 0x08000000: 8 MB
@@ -121,6 +121,7 @@ typedef struct {
     uint32_t image_base, image_words;
     const uint32_t *image;              // the game code it was translated from
     uint64_t image_hash;
+    char game[8];                       // which game's code ("ki1", "ki2")
 } rec_module_t;
 
 // Every module (and the program, for linked-in code) defines this.

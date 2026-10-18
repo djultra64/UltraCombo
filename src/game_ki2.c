@@ -2,11 +2,10 @@
 // L1.4 code and were found by diffing deterministic runs.
 #include "game.h"
 
-const game_t game = {
+const game_t game_ki2 = {
     .id = "ki2",
     .title = "Killer Instinct 2",
     .product = "UltraCombo 2",
-    .file_name = "UltraCombo2",
     .icon_text = "UC2",
 
     .versions = { { "1.4", "ki2-l14.u98", 0x27d0285e } },

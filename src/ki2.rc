@@ -11,11 +11,11 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "UltraCombo 2 - native port for the Killer Instinct 2 arcade game"
+      VALUE "FileDescription", "UltraCombo - native ports of the Killer Instinct arcade games"
       VALUE "FileVersion", "1.0"
-      VALUE "ProductName", "UltraCombo 2"
+      VALUE "ProductName", "UltraCombo"
       VALUE "ProductVersion", "1.0"
-      VALUE "OriginalFilename", "UltraCombo2.exe"
+      VALUE "OriginalFilename", "UltraCombo.exe"
     END
   END
   BLOCK "VarFileInfo"

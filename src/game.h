@@ -1,6 +1,6 @@
 // What differs between the games UltraCombo plays. Both run on the same
-// board (MAME's kinst driver); each program links one profile: game_ki1.c
-// (UltraCombo) or game_ki2.c (UltraCombo 2).
+// board (MAME's kinst driver). The program holds both profiles (game_ki1.c,
+// game_ki2.c) and picks one at startup; `game` is the one in use.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,7 +15,6 @@ typedef struct {
     const char *id;             // "ki1" / "ki2"
     const char *title;          // the game it plays, e.g. "Killer Instinct 2"
     const char *product;        // window and dialog titles, e.g. "UltraCombo 2"
-    const char *file_name;      // program, data folder and packages, e.g. "UltraCombo2"
     const char *icon_text;      // up to 3 characters; a final digit is drawn glowing
 
     game_version_t versions[4]; // [0] is the default; label NULL ends the list
@@ -59,4 +58,11 @@ typedef struct {
     uint32_t adj_headers[2];
 } game_t;
 
-extern const game_t game;
+// The program as a whole: its name and its data folder.
+#define PRODUCT "UltraCombo"
+
+extern game_t game;                          // the profile in use (game_select)
+extern const game_t game_ki1, game_ki2;
+extern const game_t *const game_profiles[]; // NULL-terminated
+void game_select(const game_t *g);
+const game_t *game_find(const char *id);    // by id ("ki1", "ki2"), NULL if unknown

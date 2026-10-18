@@ -7,6 +7,7 @@
 // may need to enter at. Branches inside a function become gotos (backward
 // ones check whether to return to the dispatcher), everything else exits.
 #include "recomp.h"
+#include "game.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -501,14 +502,14 @@ bool recomp_generate(const uint8_t *snap0, const uint8_t *snap2, const char *out
               "#endif\n\n"
               "static const rec_module_t module = {\n"
               "    REC_ABI_VERSION, sizeof(cpu_t), sizeof(tlbc_t), funcs, labels, %d, %d,\n"
-              "    0x%08xu, %uu, image, 0x%016llxull,\n"
+              "    0x%08xu, %uu, image, 0x%016llxull, \"%s\",\n"
               "};\n\n"
               "REC_EXPORT const rec_module_t *rec_module_init(const rec_host_t *host)\n{\n"
               "    if (host->abi != REC_ABI_VERSION || host->sizeof_cpu != sizeof(cpu_t) || host->sizeof_tlbc != sizeof(tlbc_t))\n"
               "        return 0;\n"
               "    rec_bind_(host);\n"
               "    return &module;\n}\n",
-        starts.n, nlabels, BASE, nwords, (unsigned long long)h);
+        starts.n, nlabels, BASE, nwords, (unsigned long long)h, game.id);
     if (ok) ok = write_text(outdir, "rec_tab.c", &tab, err, errlen);
 
     if (info) {

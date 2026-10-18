@@ -26,3 +26,5 @@ bool machine_version_available(int v);   // its boot ROM is there
 // Load version v's boot ROM and settings; then reset the machine and get its
 // translated code (the frontend does both).
 bool machine_switch_version(int v, char *err, size_t n);
+bool machine_both_installed(void);    // both games' files are there
+void machine_restart_to_picker(void); // save, and start again at the game picker

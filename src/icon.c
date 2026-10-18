@@ -13,7 +13,9 @@ static uint32_t argb(float a, float r, float g, float b)
     return (uint32_t)(a * 255) << 24 | (uint32_t)(r * 255) << 16 | (uint32_t)(g * 255) << 8 | (uint32_t)(b * 255);
 }
 
-void icon_pixels(uint32_t *px, int size)
+void icon_pixels(uint32_t *px, int size) { icon_pixels_text(px, size, game.icon_text ? game.icon_text : "UC"); }
+
+void icon_pixels_text(uint32_t *px, int size, const char *text)
 {
     // tile: vertical gradient, rounded corners
     float rad = size * 0.18f;
@@ -40,7 +42,6 @@ void icon_pixels(uint32_t *px, int size)
             px[y * size + x] = argb(a, r, g, b);
         }
     // 5x7 glyphs, scaled to fit with a dark outline; a final digit glows
-    const char *text = game.icon_text;
     int n = (int)strlen(text);
     int units = 6 * n - 1;                                           // glyph columns plus gaps
     int scale = (int)(size * 0.82f / units);                         // text ~80% wide...

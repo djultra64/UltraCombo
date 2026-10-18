@@ -1,6 +1,7 @@
 // Recompiled code dispatch: maps entry addresses to generated functions and
 // checks that the game's code in RAM still matches the recompiled image.
 #include "rec.h"
+#include "game.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -32,6 +33,7 @@ static bool use(const rec_module_t *m)
         fprintf(stderr, "rec: translated code is from another version, not used\n");
         return false;
     }
+    if (strncmp(m->game, game.id, sizeof m->game)) return false;     // the other game's code
     rec_mod = m;
     rec_image_base = m->image_base;
     rec_image_words = m->image_words;
