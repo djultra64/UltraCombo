@@ -99,6 +99,8 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
     }
     for (int i = 0; i < 2; i++) icon_pixels_text(icons[i], ICON, games[i]->icon_text);
 
+    SDL_GameController *pads[8];
+    int npads = 0;
     int sel = initial == 1 ? 1 : 0;
     if (!installed[sel]) sel = !sel;
     const game_t *chosen = NULL;
@@ -110,7 +112,9 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_QUIT: done = true; break;
-            case SDL_CONTROLLERDEVICEADDED: SDL_GameControllerOpen(ev.cdevice.which); break;
+            case SDL_CONTROLLERDEVICEADDED:
+                if (npads < 8 && (pads[npads] = SDL_GameControllerOpen(ev.cdevice.which))) npads++;
+                break;
             case SDL_KEYDOWN:
                 switch (ev.key.keysym.sym) {
                 case SDLK_LEFT: case SDLK_a: move = -1; break;
@@ -161,6 +165,7 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
         SDL_RenderPresent(r);
         SDL_Delay(10);
     }
+    for (int i = 0; i < npads; i++) SDL_GameControllerClose(pads[i]);   // the game opens its own
     SDL_DestroyTexture(tex);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);

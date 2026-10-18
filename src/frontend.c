@@ -199,6 +199,9 @@ static SDL_GameController *pads[MAX_PADS];
 
 static void pad_added(int index)
 {
+    SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(index);
+    for (int i = 0; i < MAX_PADS; i++)                      // already a player (startup scan + its event)
+        if (pads[i] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pads[i])) == id) return;
     for (int i = 0; i < MAX_PADS; i++) {
         if (pads[i]) continue;
         pads[i] = SDL_GameControllerOpen(index);
@@ -1336,6 +1339,10 @@ int frontend_main(void)
         FILE *f = fopen(db, "rb");
         if (f) { fclose(f); SDL_GameControllerAddMappingsFromFile(db); }
     }
+    // Pads already connected. Their connect events may be gone: the game picker
+    // runs first in the same process and takes them.
+    for (int i = 0; i < SDL_NumJoysticks(); i++)
+        if (SDL_IsGameController(i)) pad_added(i);
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
     win = video_open(game.product, 320 * scale, 240 * scale);
     if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
