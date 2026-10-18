@@ -32,7 +32,7 @@ The game's ROMs, disk image and code are copyrighted. This repo is public.
 | **What differs per game**: names, files, disk geometry, I/O port addresses, RAM locations, icon text | `game.h`, `game_ki1.c`, `game_ki2.c` (each program links one) |
 | CPU: MIPS R4600 interpreter, TLB, exceptions | `cpu.c/h`, `disasm.c` |
 | Memory map and I/O | `mem.c/h`, `machine.h` |
-| IDE disk (settings sectors journaled in memory) | `ide.c/h` |
+| IDE disk: raw image or MAME CHD (read-only, via libchdr), settings sectors in memory and in `saves/<boot ROM>.settings` | `ide.c/h`, `third_party/libchdr/` |
 | Sound: DCS board, ADSP-2105 core | `dcs.c`, `adsp.c/h`, `sound.h` |
 | Translated code: dispatcher, maps | `rec.c/h` |
 | The translator (MIPS to C), used at run time | `recomp.c/h` (`tools/recomp.py` is the original) |
@@ -54,6 +54,17 @@ constant in shared code. A feature that needs a RAM location the profile
 doesn't know yet (0) must turn itself off. Per-game files are named after
 `game.id`: `ki1.ini` / `ki2.ini`, `.log`, `slotN.ki1s` / `.ki2s`, screenshots.
 Changes to shared code must keep UltraCombo 2's regression hashes.
+
+## Disk images
+
+The program reads the disk as a raw file or as MAME's CHD, and never writes
+to either. The only sectors the games write are the first 32 KB (settings,
+audits, high scores). They live in memory, so states cover them, and are
+saved to `saves/<boot ROM stem>.settings`, one file per game version. A
+write outside them would only be kept for the session, with a warning; none
+has been seen. `ide_image_id()` hashes the contents, so a raw image and a CHD
+of the same disk share cached builds, states and netplay. The profile holds
+MAME's CRC32s and CHD SHA1, and the files are checked at startup.
 
 ## Determinism (netplay, rewind and run-ahead depend on it)
 
@@ -111,8 +122,9 @@ printing a state hash:
 
     tools/regress.sh [-g ki1|ki2] PROGRAM DISK_HEAD [RUN_DIR] [WORK_DIR]
 
-It works on a copy of the disk and never writes to the one in `run/`, and it
-fixes the DIP switches, so the user's settings don't matter. Compare the hash
+The disk image is only read (by the program and by this script). The saved
+head goes into a settings file in the work folder, `DISK=` picks the raw
+image or the CHD (same hash), and the script fixes the DIP switches, so the user's settings don't matter. Compare the hash
 against the reference for the same game and disk head. Translated and
 interpreted runs give different hashes, both valid, because translated code
 takes interrupts at block boundaries. What must match is every build of the

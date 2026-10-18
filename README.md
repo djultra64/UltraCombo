@@ -8,12 +8,23 @@ need your own copies of the game data; none are included.
 
 ## Setup
 
-Put these in `run/` (or point `ki2.ini` at them):
+Put these in `run/` (or point `ki2.ini` at them). They are the files of
+MAME's `kinst2` set:
 
-- `ki2-l14.u98` — boot ROM
-- `kinst2.raw` — the hard disk, extracted from the MAME CHD:
-  `chdman extractraw -i kinst2.chd -o kinst2.raw`
-- `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36` — sound ROMs
+- `ki2-l14.u98`: boot ROM
+- `kinst2.chd`: the hard disk, MAME's CHD as it is. It can also sit in a
+  `kinst2/` folder inside `run/`, the way MAME keeps it. A raw image
+  (`kinst2.raw`, from `chdman extractraw`) works too, and is used if both
+  are there.
+- `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36`: sound ROMs
+
+The disk image is only ever read. The game's settings, audits and high
+scores (its first 32 KB) go to `saves/ki2-l14.settings`, one file per game
+version. A raw image that earlier versions of this program wrote to keeps
+its settings: they are copied into that file on the first launch. At startup
+the program compares the files with MAME's good dumps, and warns if one
+doesn't match. `ultracombo2 --write-raw kinst2.raw` writes the disk out as a
+raw image, the same as `chdman extractraw`, if you ever need one.
 
 ### Checking your files
 
@@ -52,10 +63,10 @@ MD5` (Windows) or any ROM manager. Every ROM is 524,288 bytes.
 | `u36-l1` | sound | `57b73bec5d0e8c90d8898e102ce4066b` | `cc78070cc41701e9a91fde5cfbdc7e1e83354854` |
 | `kinst.raw` | disk, freshly extracted | `6d4c2f152c9a18ab3a9b05b8804306a8` | `a37a2c5e52ea936a715210d237874dd573bb002f` |
 
-The disk checksums are for the image right after extraction: the game writes
-its settings and high scores into the first sectors, so after the first
-launch the `.raw` file no longer matches. To check a disk, check the CHD
-instead. A CHD file's own MD5 depends on the chdman version that made it, so
+The raw disk checksums are for an image straight from the CHD. This program
+never writes to it, but earlier versions did, and so do other programs that
+use raw images; an image that has been played on no longer matches. To check
+a disk, check the CHD instead. A CHD file's own MD5 depends on the chdman version that made it, so
 compare the SHA1 that `chdman info -i FILE` prints as "SHA1" (the one MAME
 uses):
 
@@ -80,8 +91,9 @@ If none works the game runs on the interpreter, with a warning; see
 `build.log` in `cache/src-*/`. All three produce code that behaves identically, so
 netplay works between them.
 
-Settings, the log, screenshots, states and the cache are written next to the
-program if that folder is writable, else into the user data folder
+Settings, the game's saves, the log, screenshots, states and the cache are
+written next to the program if that folder is writable, else into the user
+data folder
 (`%APPDATA%\UltraCombo2\` on Windows, `~/.local/share/UltraCombo2/` on
 Linux), whose `run/` folder is also searched for the game files.
 
@@ -285,4 +297,6 @@ UltraCombo 2 is MIT-licensed (`LICENSE`). That covers this project's own code
 only: the game, its code and its data belong to their owners, and you need
 your own copy. Bundled third-party parts keep their licences: stb_image
 (public domain / MIT), the shaders in `shaders/` (see `shaders/README.txt`),
-and in the release packages SDL2 (zlib), Zig (MIT) and TinyCC (LGPL 2.1).
+libchdr, which reads CHDs, with the decompressors it bundles (BSD, public
+domain, MIT; see `src/third_party/libchdr/SOURCE.txt`), and in the release
+packages SDL2 (zlib), Zig (MIT) and TinyCC (LGPL 2.1).

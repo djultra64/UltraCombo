@@ -61,6 +61,16 @@ else
     cp "$tcc/libtcc.so" "$out/tools/tcc/"
 fi
 cp "$tcc/COPYING" "$out/licenses/TinyCC-COPYING.txt"
+
+# libchdr (reads MAME CHDs) and its decompressors, compiled into the program
+chdr=src/third_party/libchdr
+{
+    cat "$chdr/SOURCE.txt"
+    printf '\n==== libchdr ====\n\n';     cat "$chdr/LICENSE.txt"
+    printf '\n==== zstd ====\n\n';        cat "$chdr/deps/zstd-1.5.7/LICENSE"
+    printf '\n==== LZMA SDK ====\n\n';    cat "$chdr/deps/lzma-26.02/LICENSE"
+    printf '\n==== miniz ====\n\n';       sed -n '/Copyright/,/^ \*\*\*\*/p' "$chdr/deps/miniz-3.1.2/miniz.c" | head -40
+} > "$out/licenses/libchdr-and-decompressors.txt"
 echo "TinyCC source: https://repo.or.cz/tinycc.git, commit e23dabe (built unmodified)" > "$out/tools/tcc/SOURCE.txt"
 
 # shaders; the GPL extras are shipped as the source files they are

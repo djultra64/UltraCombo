@@ -5,7 +5,8 @@ This package does NOT contain the game. You need your own copy of the
 arcade game's files. Nothing from the game (no ROM data, no disk data,
 no game code) is included here.
 
-1. Put your game files in the "run" folder (see run/PUT-GAME-FILES-HERE.txt).
+1. Put your game files in the "run" folder (see run/PUT-GAME-FILES-HERE.txt):
+   the ROMs and MAME's CHD as they are, no conversion needed.
 2. Start the program (UltraCombo2.exe on Windows, ./ultracombo2 on Linux).
 
 AppImage (Linux): make a folder named "run" beside UltraCombo2-x86_64.AppImage
@@ -26,8 +27,9 @@ speed on most PCs. If none of them work the game runs on the slower
 built-in interpreter, and a warning tells you why (see build.log in the
 cache/src-* folder).
 
-Settings (ki2.ini), screenshots, save states and the cache go next to the
-program if that folder is writable, otherwise into your user data folder:
+Settings (ki2.ini), the game's own saves (settings and high scores, in
+"saves"), screenshots, save states and the cache go next to the program if
+that folder is writable, otherwise into your user data folder:
   Windows: %APPDATA%\UltraCombo2\
   Linux:   ~/.local/share/UltraCombo2/
 
@@ -40,6 +42,7 @@ Killer Instinct is a trademark of its owners. This project is not
 affiliated with or endorsed by them.
 
 Licences are in the "licenses" folder: UltraCombo 2 itself (MIT), SDL2
-(zlib), Zig (MIT), TinyCC (LGPL 2.1, used as a separate library; source:
+(zlib), libchdr and its decompressors (BSD, MIT, public domain), Zig (MIT),
+TinyCC (LGPL 2.1, used as a separate library; source:
 see tools/tcc/SOURCE.txt), shaders (licence header in each file; those in
 shaders/extra are GPL: xBRZ GPL 3.0, the others GPL 2.0 or later).

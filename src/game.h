@@ -8,6 +8,7 @@
 typedef struct {
     const char *label;          // as shown to the player, e.g. "1.5d"
     const char *rom;            // boot ROM file name
+    uint32_t crc;               // CRC32 of the good dump (MAME's)
 } game_version_t;
 
 typedef struct {
@@ -19,8 +20,11 @@ typedef struct {
 
     game_version_t versions[4]; // [0] is the default; label NULL ends the list
     const char *sound_roms[8];  // U10-U13, U33-U36
+    uint32_t sound_crc[8];
+    const char *set;            // MAME's name for the game (its CHD sits in a folder of that name)
     const char *disk;           // raw disk image file name
-    const char *chd;            // the MAME CHD it is extracted from
+    const char *chd;            // or the MAME CHD itself
+    const char *chd_sha1;       // the CHD's SHA1 as chdman shows it (MAME's)
 
     // drive geometry (from the CHD metadata) and the identify word where the
     // game checks the drive model

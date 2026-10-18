@@ -1,8 +1,10 @@
-// IDE/ATA hard disk backed by a raw image file. The first sectors (the
-// game's settings and audits) are kept in memory so save states cover them,
-// and written back by ide_flush(); everything else is read through a cache.
+// IDE/ATA hard disk backed by a disk image: a raw file or a MAME CHD, both
+// only ever read. The first sectors (the game's settings, audits and high
+// scores) are kept in memory so save states cover them, and saved to a small
+// settings file of their own by ide_flush(); the image itself stays as it is.
 #include "ide.h"
 #include "cpu.h"
+#include "third_party/libchdr/include/libchdr/chd.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -22,13 +24,21 @@
 #define ST_DRDY 0x40
 #define ST_BSY  0x80
 
-static FILE *disk;
+static FILE *raw;                           // the image: a raw file...
+static chd_file *chd;                       // ...or a CHD
+static char chd_sha1_hex[41];
+static char settings_path[4096];
 static uint8_t tracked[IDE_TRACK_BYTES];   // sectors 0-63, the authoritative copy
 static bool tracked_unsaved;
 
-#define CACHE_BYTES (64 * 1024)
-static uint8_t cache[CACHE_BYTES];
-static uint64_t cache_at = ~0ull;
+// Image blocks, read as needed: 16 KB of a raw file, or one CHD hunk.
+#define CACHE_SLOTS 64
+static uint32_t block_bytes;
+static struct { uint64_t at; uint8_t *data; } cache[CACHE_SLOTS];
+
+// Writes outside the settings sectors (no game makes any): kept for the session.
+static struct { uint32_t lba; uint8_t data[512]; } *extra;
+static int nextra;
 
 static struct {
     uint8_t *img;                          // unused, kept for the save state layout
@@ -58,33 +68,59 @@ void ide_power_on(void)
     d.size = size;
 }
 
-// Cheap identity of the disk image: its size plus 4 KB from every 4 MB.
+static const uint8_t *image_block(uint64_t blk)
+{
+    int slot = (int)(blk % CACHE_SLOTS);
+    if (cache[slot].at == blk) return cache[slot].data;
+    uint8_t *b = cache[slot].data;
+    memset(b, 0, block_bytes);                  // unreadable: zeros
+    if (chd) {
+        static bool warned;
+        if (chd_read(chd, (uint32_t)blk, b) != CHDERR_NONE && !warned) {
+            fprintf(stderr, "ide: the CHD has an unreadable block (%llu)\n", (unsigned long long)blk);
+            warned = true;
+        }
+    } else if (fseek64(raw, (long long)(blk * block_bytes), SEEK_SET) == 0 && fread(b, 1, block_bytes, raw) > 0) {}
+    cache[slot].at = blk;
+    return b;
+}
+
+// Bytes of the image as stored, ignoring the settings file.
+static void image_read(uint64_t off, void *dst, size_t n)
+{
+    uint8_t *o = dst;
+    while (n) {
+        uint64_t blk = off / block_bytes;
+        size_t at = (size_t)(off % block_bytes), k = block_bytes - at < n ? block_bytes - at : n;
+        memcpy(o, image_block(blk) + at, k);
+        o += k; off += k; n -= k;
+    }
+}
+
+// Cheap identity of the disk image: its size plus 4 KB from every 4 MB. The
+// same for a raw file and a CHD of the same disk.
 uint64_t ide_image_id(void)
 {
     uint64_t h = 0xcbf29ce484222325ull ^ d.size;
     static uint8_t buf[4096];
     for (uint64_t off = 0; off + sizeof buf <= d.size; off += 4u << 20) {
         if (off < IDE_TRACK_BYTES) continue;              // settings: synced separately
-        if (fseek64(disk, (long long)off, SEEK_SET) || fread(buf, 1, sizeof buf, disk) != sizeof buf) break;
+        image_read(off, buf, sizeof buf);
         for (size_t i = 0; i < sizeof buf; i++) { h ^= buf[i]; h *= 0x100000001b3ull; }
     }
-    cache_at = ~0ull;
     return h;
 }
 
 uint8_t *ide_tracked(void) { return tracked; }
+const char *ide_chd_sha1(void) { return chd ? chd_sha1_hex : NULL; }
+uint64_t ide_image_size(void) { return d.size; }
 
 static void read_sector(uint32_t lba, void *dst)
 {
     uint64_t off = (uint64_t)lba * 512;
     if (off < IDE_TRACK_BYTES) { memcpy(dst, tracked + off, 512); return; }
-    uint64_t blk = off & ~(uint64_t)(CACHE_BYTES - 1);
-    if (blk != cache_at) {
-        memset(cache, 0, CACHE_BYTES);
-        if (fseek64(disk, (long long)blk, SEEK_SET) == 0 && fread(cache, 1, CACHE_BYTES, disk) > 0) {}
-        cache_at = blk;
-    }
-    memcpy(dst, cache + (off - blk), 512);
+    for (int i = 0; i < nextra; i++) if (extra[i].lba == lba) { memcpy(dst, extra[i].data, 512); return; }
+    image_read(off, dst, 512);
 }
 
 static void write_sector(uint32_t lba, const void *src)
@@ -97,19 +133,32 @@ static void write_sector(uint32_t lba, const void *src)
         return;
     }
     static bool warned;
-    if (!warned) fprintf(stderr, "ide: write to sector %u is not covered by save states\n", lba);
+    if (!warned) fprintf(stderr, "ide: write to sector %u is kept only until the program closes\n", lba);
     warned = true;
-    if (off >> 16 == cache_at >> 16) cache_at = ~0ull;
-    if (fseek64(disk, (long long)off, SEEK_SET) == 0) fwrite(src, 1, 512, disk);
-    fflush(disk);
+    int i = 0;
+    while (i < nextra && extra[i].lba != lba) i++;
+    if (i == nextra) {
+        extra = realloc(extra, sizeof *extra * (size_t)(nextra + 1));
+        extra[nextra++].lba = lba;
+    }
+    memcpy(extra[i].data, src, 512);
 }
 
+// Save the settings sectors: to a new file first, so a crash can't leave half of one.
 void ide_flush(void)
 {
-    if (!disk || !tracked_unsaved) return;
-    tracked_unsaved = false;
-    if (fseek64(disk, 0, SEEK_SET) == 0) fwrite(tracked, 1, IDE_TRACK_BYTES, disk);
-    fflush(disk);
+    if (!tracked_unsaved || !*settings_path) return;
+    char tmp[4200];
+    snprintf(tmp, sizeof tmp, "%s.new", settings_path);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) { fprintf(stderr, "ide: can't write %s\n", tmp); return; }
+    bool ok = fwrite(tracked, 1, IDE_TRACK_BYTES, f) == IDE_TRACK_BYTES;
+    ok &= fclose(f) == 0;
+    if (!ok) { remove(tmp); return; }
+#ifdef _WIN32
+    remove(settings_path);                      // rename doesn't replace on Windows
+#endif
+    if (rename(tmp, settings_path) == 0) tracked_unsaved = false;
 }
 
 void ide_tracked_changed(void) { tracked_unsaved = true; }
@@ -143,14 +192,39 @@ static void ident_str(int word, int nwords, const char *s)
     }
 }
 
-bool ide_open(const char *path, uint32_t cyls, uint32_t heads, uint32_t secs, int serial_offset)
+static bool open_image(const char *path)
 {
-    disk = fopen(path, "r+b");
-    if (!disk) { perror(path); return false; }
-    fseek64(disk, 0, SEEK_END);
-    d.size = (uint64_t)ftell64(disk);
-    fseek64(disk, 0, SEEK_SET);
-    if (fread(tracked, 1, IDE_TRACK_BYTES, disk) != IDE_TRACK_BYTES) { fprintf(stderr, "%s: too small\n", path); return false; }
+    FILE *f = fopen(path, "rb");
+    if (!f) { perror(path); return false; }
+    char magic[8] = { 0 };
+    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "MComprHD", 8)) {
+        fclose(f);
+        chd_error e = chd_open(path, CHD_OPEN_READ, NULL, &chd);
+        if (e != CHDERR_NONE) { fprintf(stderr, "%s: %s\n", path, chd_error_string(e)); chd = NULL; return false; }
+        const chd_header *h = chd_get_header(chd);
+        d.size = h->logicalbytes;
+        block_bytes = h->hunkbytes;
+        for (int i = 0; i < 20; i++) snprintf(chd_sha1_hex + 2 * i, 3, "%02x", h->sha1[i]);
+    } else {
+        raw = f;
+        fseek64(raw, 0, SEEK_END);
+        d.size = (uint64_t)ftell64(raw);
+        block_bytes = 16384;
+    }
+    for (int i = 0; i < CACHE_SLOTS; i++) { cache[i].data = malloc(block_bytes); cache[i].at = ~0ull; }
+    if (d.size < IDE_TRACK_BYTES) { fprintf(stderr, "%s: too small\n", path); return false; }
+    return true;
+}
+
+bool ide_open(const char *image, const char *settings, uint32_t cyls, uint32_t heads, uint32_t secs, int serial_offset)
+{
+    if (!open_image(image)) return false;
+    // the settings sectors: from the settings file once there is one, else
+    // from the image (a raw file keeps what earlier versions wrote into it)
+    snprintf(settings_path, sizeof settings_path, "%s", settings ? settings : "");
+    FILE *s = settings ? fopen(settings, "rb") : NULL;
+    if (!s || fread(tracked, 1, IDE_TRACK_BYTES, s) != IDE_TRACK_BYTES) image_read(0, tracked, IDE_TRACK_BYTES);
+    if (s) fclose(s);
     atexit(ide_flush);
 
     d.cyls = cyls; d.heads = heads; d.secs = secs;
@@ -189,6 +263,22 @@ bool ide_open(const char *path, uint32_t cyls, uint32_t heads, uint32_t secs, in
     d.irq_delay = -1;
     d_power_on = d;
     return true;
+}
+
+// Write the image out as a raw file (what chdman extractraw makes).
+bool ide_write_raw(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) { perror(path); return false; }
+    static uint8_t buf[1 << 16];
+    bool ok = true;
+    for (uint64_t off = 0; off < d.size && ok; off += sizeof buf) {
+        size_t n = d.size - off < sizeof buf ? (size_t)(d.size - off) : sizeof buf;
+        image_read(off, buf, n);
+        ok = fwrite(buf, 1, n, f) == n;
+    }
+    ok &= fclose(f) == 0;
+    return ok;
 }
 
 static uint32_t cur_lba(void)

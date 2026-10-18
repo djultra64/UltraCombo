@@ -15,6 +15,12 @@
 #include <string.h>
 #include <stdarg.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define make_dir(p) _mkdir(p)
+#else
+#define make_dir(p) mkdir(p, 0755)
+#endif
 #include "icon.h"
 #include "recomp.h"
 #include "rec_build.h"
@@ -33,6 +39,16 @@ static bool load_file(const char *path, void *dst, size_t size)
     fclose(f);
     if (n != size) { fprintf(stderr, "%s: short read\n", path); return false; }
     return true;
+}
+
+static uint32_t crc32_of(const uint8_t *p, size_t n)
+{
+    uint32_t c = 0xffffffffu;
+    for (size_t i = 0; i < n; i++) {
+        c ^= p[i];
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1)));
+    }
+    return ~c;
 }
 
 static bool readable(const char *path)
@@ -110,6 +126,64 @@ const char *find_data(const char *name, char *buf, size_t n)
     }
     snprintf(buf, n, "%srun/%s", data_dir(), name);
     return readable(buf) ? buf : name;
+}
+
+// The disk: a raw image if there is one (it may hold settings written by
+// earlier versions), else the MAME CHD, also in MAME's own folder for it.
+static const char *find_disk(char *buf, size_t n)
+{
+    const char *p = find_data(game.disk, buf, n);
+    if (readable(p)) return p;
+    p = find_data(game.chd, buf, n);
+    if (readable(p)) return p;
+    char sub[256];
+    snprintf(sub, sizeof sub, "%s/%s", game.set, game.chd);
+    p = find_data(sub, buf, n);
+    return readable(p) ? p : game.chd;
+}
+
+static void report(bool fatal, const char *fmt, ...);
+
+// Compare the files with MAME's good dumps; a warning, never a refusal.
+static void check_files(const char *rom_path, const char *sound_dir)
+{
+    char msg[2048] = "", line[600];
+    uint32_t crc = crc32_of(rom, ROM_SIZE);
+    bool known = false;
+    for (int v = 0; v < 4 && game.versions[v].label; v++) known |= crc == game.versions[v].crc;
+    if (!known) {
+        snprintf(line, sizeof line, "  %s (CRC32 %08x)\n", rom_path, crc);
+        strncat(msg, line, sizeof msg - strlen(msg) - 1);
+    }
+    static uint8_t buf[0x80000];
+    for (int i = 0; i < 8; i++) {
+        char path[4200];
+        snprintf(path, sizeof path, "%s/%s", sound_dir, game.sound_roms[i]);
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;                       // missing: reported elsewhere
+        size_t got = fread(buf, 1, sizeof buf, f);
+        fclose(f);
+        uint32_t c = crc32_of(buf, got);
+        if (got != sizeof buf || c != game.sound_crc[i]) {
+            snprintf(line, sizeof line, "  %s (CRC32 %08x)\n", path, c);
+            strncat(msg, line, sizeof msg - strlen(msg) - 1);
+        }
+    }
+    const char *sha1 = ide_chd_sha1();
+    if (sha1 && strcmp(sha1, game.chd_sha1)) {
+        snprintf(line, sizeof line, "  the CHD (SHA1 %s)\n", sha1);
+        strncat(msg, line, sizeof msg - strlen(msg) - 1);
+    }
+    uint64_t want = (uint64_t)game.cyls * game.heads * game.secs * 512;
+    if (ide_image_size() != want) {
+        snprintf(line, sizeof line, "  the disk image (%llu bytes, not %llu)\n",
+                 (unsigned long long)ide_image_size(), (unsigned long long)want);
+        strncat(msg, line, sizeof msg - strlen(msg) - 1);
+    }
+    if (*msg)
+        report(false, "These files don't match the known good dumps of %s:\n%s\n"
+               "The game may not work correctly. README.md (\"Checking your files\") lists the right ones.",
+               game.title, msg);
 }
 
 static struct {
@@ -326,10 +400,9 @@ static const char *files_help(void)
              "Put the game files in %s\n(or set their paths in %s.ini).\n\n"
              "Needed (%s):\n"
              "  %s  - boot ROM\n"
-             "  %s  - hard disk, extracted from MAME's %s with\n"
-             "      chdman extractraw -i %s -o %s\n"
+             "  %s  - hard disk: MAME's CHD as it is (or a raw image, %s)\n"
              "  %s - %s, %s - %s  - sound ROMs", where, game.id, game.title,
-             game.versions[0].rom, game.disk, game.chd, game.chd, game.disk,
+             game.versions[0].rom, game.chd, game.disk,
              game.sound_roms[0], game.sound_roms[3], game.sound_roms[4], game.sound_roms[7]);
     return buf;
 }
@@ -339,7 +412,9 @@ static void usage(void)
     fprintf(stderr,
         "usage: %s [options]\n"
         "  --rom PATH      boot ROM (%s)\n"
-        "  --disk PATH     raw disk image extracted from %s\n"
+        "  --disk PATH     disk image: MAME's %s, or a raw image extracted from it\n"
+        "  --settings PATH file for the game's settings and high scores (default: saves/)\n"
+        "  --write-raw PATH  write the disk image out as a raw file and exit\n"
         "  --sound DIR     directory holding the 8 sound ROMs (%s...)\n"
         "  --headless N    run N frames without a window\n"
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
@@ -378,7 +453,8 @@ int main(int argc, char **argv)
     snprintf(ini, sizeof ini, "%s%s.ini", data_dir(), game.id);
     config_load(ini);
     const char *rom_path = *cfg.rom ? cfg.rom : game.versions[0].rom;
-    const char *disk_path = *cfg.disk ? cfg.disk : game.disk;
+    const char *disk_path = *cfg.disk ? cfg.disk : NULL;     // NULL: look for one
+    const char *settings_path = NULL, *write_raw = NULL;
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     int save_at = 0, rewind_test = 0, runahead = 0;
@@ -390,6 +466,8 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_path = argv[++i];
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk_path = argv[++i];
+        else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settings_path = argv[++i];
+        else if (!strcmp(argv[i], "--write-raw") && i + 1 < argc) write_raw = argv[++i];
         else if (!strcmp(argv[i], "--sound") && i + 1 < argc) sound_dir = argv[++i];
         else if (!strcmp(argv[i], "--headless") && i + 1 < argc) headless = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot-every") && i + 1 < argc) shot_every = atoi(argv[++i]);
@@ -429,7 +507,12 @@ int main(int argc, char **argv)
     headless_mode = headless || dis_count;
     static char rom_buf[4096], disk_buf[4096];
     rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
-    disk_path = find_data(disk_path, disk_buf, sizeof disk_buf);
+    disk_path = disk_path ? find_data(disk_path, disk_buf, sizeof disk_buf) : find_disk(disk_buf, sizeof disk_buf);
+    if (write_raw) {                        // a tool: needs only the disk
+        bool ok = ide_open(disk_path, NULL, game.cyls, game.heads, game.secs, game.serial_offset) && ide_write_raw(write_raw);
+        fprintf(stderr, "%s %s\n", ok ? "wrote" : "could not write", write_raw);
+        return ok ? 0 : 1;
+    }
     if (!load_file(rom_path, rom, ROM_SIZE)) {
         report(true, "%s can't start: the boot ROM %s was not found or is incomplete.\n\n%s", game.product, rom_path, files_help());
         return 1;
@@ -448,10 +531,23 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    if (!ide_open(disk_path, game.cyls, game.heads, game.secs, game.serial_offset)) {
-        report(true, "%s can't start: the disk image %s was not found.\n\n%s", game.product, disk_path, files_help());
+    // the game's settings and high scores: one file per boot ROM (game version)
+    static char settings_buf[4400];
+    if (!settings_path) {
+        const char *base = strrchr(rom_path, '/'), *b2 = strrchr(rom_path, '\\');
+        if (b2 > base) base = b2;
+        base = base ? base + 1 : rom_path;
+        snprintf(settings_buf, sizeof settings_buf, "%ssaves", data_dir());
+        make_dir(settings_buf);
+        snprintf(settings_buf, sizeof settings_buf, "%ssaves/%.*s.settings", data_dir(),
+                 (int)(strchr(base, '.') ? (size_t)(strchr(base, '.') - base) : strlen(base)), base);
+        settings_path = settings_buf;
+    }
+    if (!ide_open(disk_path, settings_path, game.cyls, game.heads, game.secs, game.serial_offset)) {
+        report(true, "%s can't start: the disk image %s was not found or can't be read.\n\n%s", game.product, disk_path, files_help());
         return 1;
     }
+
     static char snd_buf[4096];
     if (!strcmp(sound_dir, ".")) {
         // locate the sound ROMs the same way as the boot ROM
@@ -462,6 +558,7 @@ int main(int argc, char **argv)
     }
     if (!sound_init(sound_dir))
         report(false, "Some sound ROMs were not found in %s, so the game will run without sound.\n\n%s", sound_dir, files_help());
+    check_files(rom_path, sound_dir);
     hw.dsw = getenv("KI2_DSW") ? (uint32_t)strtoul(getenv("KI2_DSW"), 0, 16) : config_dsw();
     cpu_reset();
     rec_init();
