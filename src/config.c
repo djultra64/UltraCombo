@@ -1,6 +1,7 @@
 // ki2.ini: a flat "[section] key = value" file. Unknown keys are ignored and
 // missing ones keep their defaults, so old files keep working.
 #include "config.h"
+#include "game.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,9 +59,13 @@ static void add(const char *sec, const char *key, type_t t, void *p, const char 
 static void build_table(void)
 {
     if (nopts) return;
-    add("paths", "rom", T_STR, cfg.rom, "", "boot ROM; empty = ki2-l14.u98 here or in run/", 0);
-    add("paths", "disk", T_STR, cfg.disk, "", "raw disk image; empty = kinst2.raw", 0);
-    add("paths", "sound", T_STR, cfg.sound, "", "directory with ki2_l1.u10..u36; empty = beside the ROM", 0);
+    static char rom_help[128], disk_help[128], sound_help[128];
+    snprintf(rom_help, sizeof rom_help, "boot ROM; empty = %s here or in run/", game.versions[0].rom);
+    snprintf(disk_help, sizeof disk_help, "raw disk image; empty = %s", game.disk);
+    snprintf(sound_help, sizeof sound_help, "directory with %s..%s; empty = beside the ROM", game.sound_roms[0], game.sound_roms[7]);
+    add("paths", "rom", T_STR, cfg.rom, "", rom_help, 0);
+    add("paths", "disk", T_STR, cfg.disk, "", disk_help, 0);
+    add("paths", "sound", T_STR, cfg.sound, "", sound_help, 0);
 
     add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "no", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
     add("video", "fullscreen_exclusive", T_BOOL, &cfg.fullscreen_exclusive, "no", "exclusive fullscreen (sets the display mode) instead of borderless", 0);
@@ -208,7 +213,7 @@ static bool write_file(const char *path, bool defaults)
 {
     FILE *f = fopen(path, "w");
     if (!f) return false;
-    fprintf(f, "; UltraCombo 2 settings. Delete this file to get the defaults back.\n");
+    fprintf(f, "; %s settings. Delete this file to get the defaults back.\n", game.product);
     const char *sec = "";
     for (int i = 0; i < nopts; i++) {
         opt_t *o = &opts[i];
@@ -266,8 +271,9 @@ void config_load(const char *path)
     fclose(f);
 }
 
-// KI2 DIP switches (MAME's kinst2 layout): bits 0-1 blood level, 2 demo sounds,
-// 3 finishing moves, 4 warning screen, 8 coinage from switches, 9-13 coinage.
+// DIP switches (the same layout on both games): bits 0-1 blood level, 2 demo
+// sounds, 3 finishing moves, 4 warning screen, 5 blood colour (KI1 only),
+// 8 coinage from switches, 9-13 coinage.
 uint32_t config_dsw(void)
 {
     uint32_t d = 0xffffffffu;

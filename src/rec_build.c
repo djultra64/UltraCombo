@@ -1,5 +1,6 @@
 // Building the translated game code on the player's machine (see rec_build.h).
 #include "rec_build.h"
+#include "game.h"
 #include "ide.h"
 #include "machine.h"
 #include "mem.h"
@@ -29,7 +30,7 @@ extern char **environ;
 #endif
 
 #define RECOMP_VERSION 1           // bump when recomp.c's output changes
-#define SNAPSHOT_FRAMES 900        // the game has loaded all of its code by then
+#define SNAPSHOT_FRAMES game.snapshot_frames   // the game has loaded all of its code by then
 
 // rec_abi.h and rec_gen.h, embedded at build time (build/rec_headers.c)
 extern const char rec_abi_h[], rec_gen_h[];

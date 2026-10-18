@@ -1,16 +1,16 @@
-// Operator adjustments on disk (see adjust.h). The block starts at disk
-// offset 0xa00 with a checksum of the following 88 bytes, computed by the
-// game's routine at 0x8802d400; 0xa04 is set once adjustments were edited,
-// 0xa1c holds the difficulty as 0-4.
+// Operator adjustments on disk (see adjust.h). The block (game.h) starts
+// with a checksum of the bytes after it; the word after the checksum is set
+// once adjustments were edited, and the difficulty is stored as 0-4.
 #include "adjust.h"
+#include "game.h"
 #include "ide.h"
 #include <stdint.h>
 #include <string.h>
 
-#define ADJ_BLOCK 0xa00
-#define ADJ_LEN 88
+#define ADJ_BLOCK game.adj_block
+#define ADJ_LEN (int)game.adj_len
 #define ADJ_EDITED (ADJ_BLOCK + 4)
-#define ADJ_DIFFICULTY 0xa1c
+#define ADJ_DIFFICULTY game.adj_difficulty
 
 // The game's checksum: a 33-bit rotate/xor shift register fed with each byte.
 static uint32_t ki2_checksum(const uint8_t *p, int n)
@@ -34,7 +34,7 @@ static bool block_valid(const uint8_t *d)
 int adjust_difficulty(void)
 {
     const uint8_t *d = ide_tracked();
-    if (!d || !block_valid(d) || d[ADJ_DIFFICULTY] > 4) return -1;
+    if (!game.adj_len || !d || !block_valid(d) || d[ADJ_DIFFICULTY] > 4) return -1;
     return d[ADJ_DIFFICULTY] + 1;
 }
 

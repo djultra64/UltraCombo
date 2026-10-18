@@ -18,6 +18,7 @@
 #include "adjust.h"
 #include "rec_build.h"
 #include "rec.h"
+#include "game.h"
 #include "video.h"
 #include "shaders.h"
 #include <SDL2/SDL.h>
@@ -257,15 +258,14 @@ static void read_players(uint32_t held[2])
 // Auto-coin: pressing Start without enough credits drops in the missing
 // coins first, then presses Start. Driven entirely through the coin and
 // start inputs, so the game does its own credit bookkeeping.
-#define CREDITS_ADDR 0x7ff124u      // ram2 offset of the credit count (l14 code)
-#define CREDITS_NEEDED 2            // default coinage: 2 credits to start or join
 
 static struct { int player, coins, t, wait; bool active; } ac;
 
 static int credits(void)
 {
+    if (!game.credits) return -1;      // not known for this game
     uint32_t v;
-    memcpy(&v, &ram2[CREDITS_ADDR], 4);
+    memcpy(&v, &ram2[game.credits], 4);
     return v < 100 ? (int)v : -1;   // garbage: different code version
 }
 
@@ -276,8 +276,8 @@ static void auto_coin(uint32_t held[2])
         for (int p = 0; p < 2; p++) {
             int c = credits();
             bool press = (held[p] & ~prev[p]) >> BTN_START & 1;
-            if (press && c >= 0 && c < CREDITS_NEEDED) {
-                ac.player = p; ac.coins = CREDITS_NEEDED - c; ac.t = ac.wait = 0; ac.active = true;
+            if (press && c >= 0 && c < game.credits_needed) {
+                ac.player = p; ac.coins = game.credits_needed - c; ac.t = ac.wait = 0; ac.active = true;
                 break;
             }
         }
@@ -293,7 +293,7 @@ static void auto_coin(uint32_t held[2])
         if (ac.t % 16 < 8) held[ac.player] |= 1u << BTN_COIN;
         ac.t++;
     } else if (ac.t == coin_frames) {
-        if (credits() >= CREDITS_NEEDED) ac.t++;
+        if (credits() >= game.credits_needed) ac.t++;
         else if (++ac.wait > 90) ac.active = false;
     } else if (ac.t < coin_frames + 11) {
         held[ac.player] |= 1u << BTN_START;
@@ -1236,7 +1236,7 @@ static void prepare_game_code(void)
     bool ok = rec_build(prepare_progress, msg, sizeof msg);
     fprintf(stderr, "rec: %s (%.0f s)\n", msg, (SDL_GetTicks64() - t0) / 1000.0);
     osd_message("%s", ok ? "Ready" : "Running without translated code (slower)");
-    if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "UltraCombo 2",
+    if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, game.product,
         "The game code could not be prepared for full speed on this PC, so the game runs on the "
         "slower interpreter. ki2.log and cache/*/build.log in the game folder say why.", win);
 }
@@ -1256,7 +1256,7 @@ int frontend_main(void)
         if (f) { fclose(f); SDL_GameControllerAddMappingsFromFile(db); }
     }
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
-    win = video_open("UltraCombo 2", 320 * scale, 240 * scale);
+    win = video_open(game.product, 320 * scale, 240 * scale);
     if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     set_window_icon(win);
     if (cfg.window_w >= 320 && cfg.window_h >= 240) {

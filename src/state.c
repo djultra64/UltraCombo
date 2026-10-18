@@ -1,5 +1,6 @@
 // Save states, rewind history and rollback (see state.h).
 #include "state.h"
+#include "game.h"
 #include "cpu.h"
 #include "ide.h"
 #include "machine.h"
@@ -246,7 +247,7 @@ uint64_t state_quick_hash(void)
 {
     core_io(core_tmp, false);
     uint64_t h = fnv(0xcbf29ce484222325ull, core_tmp, core_len);
-    return fnv(h, ram2 + 0x7f0000, 0x10000);
+    return game.vars_len ? fnv(h, ram2 + game.vars, game.vars_len) : h;
 }
 
 uint64_t state_hash(void)

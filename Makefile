@@ -17,11 +17,19 @@ REC_OBJ = $(REC_SRC:.c=.o)
 endif
 REC_CFLAGS = -O1 -g0 -fno-strict-aliasing -Isrc -w
 
-ultracombo2: $(OBJ) $(REC_OBJ)
+# Two programs from the same code: UltraCombo 2 (Killer Instinct 2) and
+# UltraCombo (Killer Instinct); they differ only in their game profile
+# (src/game_ki*.c) and translated code.
+all: ultracombo2 ultracombo
+
+ultracombo2: $(OBJ) build/game_ki2.o $(REC_OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+ultracombo: $(OBJ) build/game_ki1.o build/rec_none.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 # The distributable program: no game code inside; it builds that on first run.
-ultracombo2-dist: $(OBJ) build/rec_none.o
+ultracombo2-dist: $(OBJ) build/game_ki2.o build/rec_none.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 build/%.o: src/%.c src/*.h | build
@@ -55,7 +63,7 @@ WIN_CC   ?= x86_64-w64-mingw32-gcc
 WIN_SDL  ?= $(wildcard deps/sdl2-mingw/SDL2-*/x86_64-w64-mingw32)
 WIN_CFLAGS = -O2 -Wall -Wno-unused-parameter -I$(WIN_SDL)/include -I$(WIN_SDL)/include/SDL2 -Dmain=SDL_main
 WIN_LIBS   = -L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -lws2_32 -mwindows -static-libgcc
-WIN_OBJ     = $(SRC:src/%.c=build-win/%.o) build-win/rec_headers.o build-win/rec_none.o
+WIN_OBJ     = $(SRC:src/%.c=build-win/%.o) build-win/game_ki2.o build-win/rec_headers.o build-win/rec_none.o
 
 windows: dist/windows/UltraCombo2.exe
 
@@ -89,7 +97,7 @@ build-win/rec_headers.o: build/rec_headers.c
 # is built the same way into deps/sdl2-lnx and shipped in lib/ beside it.
 LNX_ZIG  ?= deps/zig-linux/zig
 LNX_SDL  ?= deps/sdl2-lnx/build/libSDL2-2.0.so.0
-LNX_SRC   = $(SRC) src/rec_none.c build/rec_headers.c
+LNX_SRC   = $(SRC) src/game_ki2.c src/rec_none.c build/rec_headers.c
 
 build-lnx/ultracombo2: $(LNX_SRC) src/*.h
 	mkdir -p build-lnx/inc/SDL2
@@ -114,7 +122,7 @@ package-windows: dist/windows/UltraCombo2.exe
 packages: package-appimage package-windows
 
 clean:
-	rm -rf build build-win build-lnx dist ultracombo2 ultracombo2-dist
+	rm -rf build build-win build-lnx dist ultracombo2 ultracombo2-dist ultracombo
 
 # GPL-licensed libretro shaders (xBRZ, crt-guest, crt-royale, ...) for local
 # use: fetched from github.com/libretro/glsl-shaders into deps/.
@@ -130,4 +138,4 @@ shaders-extra:
 	    cd $(SHADER_REPO) && git sparse-checkout set crt xbrz blurs)
 	python3 tools/install_shaders.py $(SHADER_REPO) shaders/extra $(EXTRA_SHADERS)
 
-.PHONY: clean recomp windows shaders-extra package-linux package-appimage package-windows packages
+.PHONY: all clean recomp windows shaders-extra package-linux package-appimage package-windows packages

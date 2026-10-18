@@ -1,8 +1,9 @@
-// Program icon: "UC2" on a dark red rounded tile with three claw slashes
-// behind it, built from the OSD font (no game art).
+// Program icon: the profile's text ("UC2", "UC") on a dark red rounded tile
+// with three claw slashes behind it, built from the OSD font (no game art).
 #include "icon.h"
 #include "osd.h"
 #include "png.h"
+#include "game.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,13 +39,17 @@ void icon_pixels(uint32_t *px, int size)
                 }
             px[y * size + x] = argb(a, r, g, b);
         }
-    // "UC2": 3 glyphs of 5x7, scaled to fit with a dark outline; the 2 glows
-    const char *text = "UC2";
-    int scale = (int)(size * 0.82f / 17) > 0 ? (int)(size * 0.82f / 17) : 1;   // text ~80% wide
-    int gw = 5 * scale, gap = size <= 16 ? 0 : scale, tw = 3 * gw + 2 * gap, th = 7 * scale;
+    // 5x7 glyphs, scaled to fit with a dark outline; a final digit glows
+    const char *text = game.icon_text;
+    int n = (int)strlen(text);
+    int units = 6 * n - 1;                                           // glyph columns plus gaps
+    int scale = (int)(size * 0.82f / units);                         // text ~80% wide...
+    if (7 * scale > size * 0.55f) scale = (int)(size * 0.55f / 7);   // ...and not too tall
+    if (scale < 1) scale = 1;
+    int gw = 5 * scale, gap = size <= 16 ? 0 : scale, tw = n * gw + (n - 1) * gap, th = 7 * scale;
     int x0 = (size - tw) / 2, y0 = (size - th) / 2;
     for (int pass = 0; pass < 2; pass++)
-        for (int c = 0; c < 3; c++) {
+        for (int c = 0; c < n; c++) {
             const uint8_t *gl = osd_glyph(text[c]);
             for (int col = 0; col < 5; col++)
                 for (int row = 0; row < 7; row++) {
@@ -57,7 +62,8 @@ void icon_pixels(uint32_t *px, int size)
                             int x = x0 + c * (gw + gap) + col * scale + dx, y = y0 + row * scale + dy;
                             if (x < 0 || y < 0 || x >= size || y >= size) continue;
                             float t = (float)(row * scale + dy) / (float)th;
-                            uint32_t fill = c < 2 ? argb(1, 1, 0.88f - 0.38f * t, 0.38f - 0.32f * t)     // gold
+                            bool hot = c == n - 1 && text[c] >= '0' && text[c] <= '9';
+                            uint32_t fill = !hot ? argb(1, 1, 0.88f - 0.38f * t, 0.38f - 0.32f * t)     // gold
                                                   : argb(1, 1, 0.97f - 0.62f * t, 0.85f - 0.80f * t);    // white-hot to orange
                             px[y * size + x] = pass ? fill : 0xff1a0000u;
                         }

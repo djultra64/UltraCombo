@@ -1,6 +1,7 @@
 // Midway DCS (rev 1, "2K" external RAM) sound board: ADSP-2105 + 8 sound EPROMs.
 #include "adsp.h"
 #include "sound.h"
+#include "game.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,10 +117,7 @@ static bool load_rom(const char *dir, const char *name, uint32_t word_offset)
 
 bool sound_init(const char *rom_dir)
 {
-    static const char *names[8] = {
-        "ki2_l1.u10", "ki2_l1.u11", "ki2_l1.u12", "ki2_l1.u13",
-        "ki2_l1.u33", "ki2_l1.u34", "ki2_l1.u35", "ki2_l1.u36",
-    };
+    const char *const *names = game.sound_roms;
     output.log = getenv("KI2_LOG_SOUND") != NULL;
     rom = malloc(ROM_WORDS * sizeof(uint16_t));
     for (uint32_t i = 0; i < ROM_WORDS; i++) rom[i] = 0xffff;

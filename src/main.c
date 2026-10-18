@@ -1,4 +1,4 @@
-// UltraCombo 2: native frontend for the Killer Instinct 2 arcade game.
+// UltraCombo: native frontend for the Killer Instinct arcade games (game.h).
 #include "config.h"
 #include "cpu.h"
 #include "ide.h"
@@ -18,6 +18,7 @@
 #include "icon.h"
 #include "recomp.h"
 #include "rec_build.h"
+#include "game.h"
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -89,7 +90,7 @@ const char *data_dir(void)
         struct stat st;
         if (!stat(run, &st) && S_ISDIR(st.st_mode) && writable_dir(ai)) { dir = SDL_strdup(ai); return dir; }
     }
-    dir = SDL_GetPrefPath("", "UltraCombo2");
+    dir = SDL_GetPrefPath("", game.file_name);
     if (!dir) dir = SDL_strdup(base_dir());
     return dir;
 }
@@ -234,7 +235,7 @@ void machine_run_inputs(const uint16_t in[2], bool resim)
     run_frame();
     static int desync_at = -1;                      // testing: KI2_DESYNC_AT=frame breaks this side
     if (desync_at < 0) desync_at = getenv("KI2_DESYNC_AT") ? atoi(getenv("KI2_DESYNC_AT")) : 0;
-    if (desync_at && machine_frame() == (uint64_t)desync_at && !resim) { ram2[0x7f0010] ^= 0x55; ram_touch(&ram2[0x7f0010]); }
+    if (desync_at && machine_frame() == (uint64_t)desync_at && !resim) { ram2[game.vars + 0x10] ^= 0x55; ram_touch(&ram2[game.vars + 0x10]); }
     state_checkpoint();
     if (resim) { int16_t junk[4096]; while (sound_fetch(junk, 4096) > 0) {} }
 }
@@ -309,7 +310,7 @@ static void report(bool fatal, const char *fmt, ...)
     va_end(ap);
     fprintf(stderr, "%s\n", msg);
     if (!headless_mode)
-        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, "UltraCombo 2", msg, NULL);
+        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, game.product, msg, NULL);
 }
 
 static const char *files_help(void)
@@ -321,21 +322,23 @@ static const char *files_help(void)
         snprintf(where, sizeof where, "\n    %srun", data_dir());
     snprintf(buf, sizeof buf,
              "Put the game files in %s\n(or set their paths in ki2.ini).\n\n"
-             "Needed:\n"
-             "  ki2-l14.u98  - boot ROM\n"
-             "  kinst2.raw  - hard disk, extracted from MAME's kinst2.chd with\n"
-             "      chdman extractraw -i kinst2.chd -o kinst2.raw\n"
-             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", where);
+             "Needed (%s):\n"
+             "  %s  - boot ROM\n"
+             "  %s  - hard disk, extracted from MAME's %s with\n"
+             "      chdman extractraw -i %s -o %s\n"
+             "  %s - %s, %s - %s  - sound ROMs", where, game.title,
+             game.versions[0].rom, game.disk, game.chd, game.chd, game.disk,
+             game.sound_roms[0], game.sound_roms[3], game.sound_roms[4], game.sound_roms[7]);
     return buf;
 }
 
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: ultracombo2 [options]\n"
-        "  --rom PATH      boot ROM (ki2-l14.u98)\n"
-        "  --disk PATH     raw disk image extracted from kinst2.chd\n"
-        "  --sound DIR     directory holding ki2_l1.u10..u36\n"
+        "usage: %s [options]\n"
+        "  --rom PATH      boot ROM (%s)\n"
+        "  --disk PATH     raw disk image extracted from %s\n"
+        "  --sound DIR     directory holding the 8 sound ROMs (%s...)\n"
         "  --headless N    run N frames without a window\n"
         "  --shot-every N  in headless mode, save a PPM every N frames\n"
         "  --script S      headless input, e.g. \"3600:coin1:6,3700:start1:6\"\n"
@@ -350,7 +353,8 @@ static void usage(void)
         "                  headless netplay test: play this side of --script until frame N\n"
         "  --net-delay N, --net-fps F, --net-sim LATENCY:JITTER:LOSS%%  (testing)\n"
         "Settings, key bindings and hotkeys are in ki2.ini beside the executable\n"
-        "(written with defaults on first run). See README.md.\n");
+        "(written with defaults on first run). See README.md.\n",
+        game.file_name, game.versions[0].rom, game.chd, game.sound_roms[0]);
 }
 
 int main(int argc, char **argv)
@@ -371,8 +375,8 @@ int main(int argc, char **argv)
     static char ini[4096];
     snprintf(ini, sizeof ini, "%ski2.ini", data_dir());
     config_load(ini);
-    const char *rom_path = *cfg.rom ? cfg.rom : "ki2-l14.u98";
-    const char *disk_path = *cfg.disk ? cfg.disk : "kinst2.raw";
+    const char *rom_path = *cfg.rom ? cfg.rom : game.versions[0].rom;
+    const char *disk_path = *cfg.disk ? cfg.disk : game.disk;
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
     int headless = 0, shot_every = 0, dis_count = 0, trace_from = 0;
     int save_at = 0, rewind_test = 0, runahead = 0;
@@ -425,7 +429,7 @@ int main(int argc, char **argv)
     rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
     disk_path = find_data(disk_path, disk_buf, sizeof disk_buf);
     if (!load_file(rom_path, rom, ROM_SIZE)) {
-        report(true, "UltraCombo 2 can't start: the boot ROM %s was not found or is incomplete.\n\n%s", rom_path, files_help());
+        report(true, "%s can't start: the boot ROM %s was not found or is incomplete.\n\n%s", game.product, rom_path, files_help());
         return 1;
     }
     if (dis_count) {
@@ -442,15 +446,14 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    // KI2 drive geometry from the CHD metadata; serial lives at identify word 11
-    if (!ide_open(disk_path, 1463, 13, 47, 11)) {
-        report(true, "UltraCombo 2 can't start: the disk image %s was not found.\n\n%s", disk_path, files_help());
+    if (!ide_open(disk_path, game.cyls, game.heads, game.secs, game.serial_offset)) {
+        report(true, "%s can't start: the disk image %s was not found.\n\n%s", game.product, disk_path, files_help());
         return 1;
     }
     static char snd_buf[4096];
     if (!strcmp(sound_dir, ".")) {
         // locate the sound ROMs the same way as the boot ROM
-        const char *u10 = find_data("ki2_l1.u10", snd_buf, sizeof snd_buf);
+        const char *u10 = find_data(game.sound_roms[0], snd_buf, sizeof snd_buf);
         const char *slash = strrchr(u10, '/');
         if (!slash) slash = strrchr(u10, '\\');
         if (slash) { memmove(snd_buf, u10, (size_t)(slash - u10)); snd_buf[slash - u10] = 0; sound_dir = snd_buf; }

@@ -1,18 +1,19 @@
-// Training mode (see training.h). RAM locations are for the l14 code and
-// were found by diffing deterministic runs; each one is sanity-checked
-// before use so other code versions are left alone.
+// Training mode (see training.h). RAM locations come from the game profile
+// (game.h); each value is sanity-checked before use, so other code versions
+// are left alone, and a game without known locations gets no training mode.
 #include "training.h"
 #include "config.h"
 #include "mem.h"
 #include "osd.h"
+#include "game.h"
 #include <string.h>
 
-#define HEALTH_P1   0x7fc105u   // ram2 offsets: current health bar, 0-120
-#define HEALTH_STEP 0x100u      // player 2's record follows player 1's
-#define HEALTH_MAX  120
-#define TIMER_TICK  0x7f7a10u   // frames until the clock ticks (~71 per tick)
-#define TIMER_ONES  0x7f7a11u
-#define TIMER_TENS  0x7f7a12u
+#define HEALTH_P1   game.health_p1
+#define HEALTH_STEP game.health_step
+#define HEALTH_MAX  game.health_max
+#define TIMER_TICK  game.timer_tick     // frames until the clock ticks
+#define TIMER_ONES  game.timer_ones
+#define TIMER_TENS  game.timer_tens
 #define REFILL_DELAY 45         // frames without damage before health refills
 
 static void poke8(uint32_t off, uint8_t v)
@@ -26,7 +27,7 @@ static struct { uint8_t last; int still; } hp[2];
 
 void training_apply(bool real)
 {
-    if (!cfg.training) return;
+    if (!cfg.training || !game.health_p1) return;
     // the clock: only touch it while it shows plausible digits
     if (ram2[TIMER_ONES] <= 9 && ram2[TIMER_TENS] <= 9 && ram2[TIMER_TICK] < 0x50) poke8(TIMER_TICK, 0x40);
     for (int p = 0; p < 2; p++) {
@@ -94,6 +95,7 @@ const char *training_status(void)
 
 int game_health(int player)
 {
+    if (!game.health_p1) return -1;
     uint8_t h = ram2[HEALTH_P1 + (uint32_t)player * HEALTH_STEP];
     bool fight = ram2[TIMER_ONES] <= 9 && ram2[TIMER_TENS] <= 9;
     return fight && h <= HEALTH_MAX ? h : -1;

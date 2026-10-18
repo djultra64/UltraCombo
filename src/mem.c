@@ -1,5 +1,7 @@
-// Killer Instinct 2 I/O space (control register layout specific to KI2).
+// I/O space. The two games' boards put the same ports at different
+// addresses (game.h).
 #include "mem.h"
+#include "game.h"
 #include "ide.h"
 #include "sound.h"
 #include <stdio.h>
@@ -23,14 +25,12 @@ static uint32_t volume_r(void)
 
 static uint32_t io_read32(uint32_t pa)
 {
-    switch (pa) {
-    case 0x10000080: return volume_r();
-    case 0x10000088: return hw.dsw;
-    case 0x10000090: return hw.p2;
-    case 0x10000098: return hw.p1;
-    case 0x100000a0: return 0xffffffffu;
-    case 0x10000170: return ide_alt_status();
-    }
+    if (pa == game.io.p1) return hw.p1;
+    if (pa == game.io.p2) return hw.p2;
+    if (pa == game.io.volume) return volume_r();
+    if (pa == game.io.dsw) return hw.dsw;
+    if (pa == game.io.unused) return 0xffffffffu;
+    if (pa == 0x10000170) return ide_alt_status();
     if (pa >= 0x10000100 && pa < 0x10000140) return ide_read((pa - 0x10000100) >> 3);
     static uint32_t last;
     if (pa != last) { fprintf(stderr, "io: unmapped read %08x\n", pa); last = pa; }
@@ -53,21 +53,20 @@ void io_write(uint32_t pa, uint32_t val, int size)
         int sh = (pa & 3) * 8;
         val <<= sh;
     }
-    switch (a) {
-    case 0x10000080: {
+    if (a == game.io.volume) {          // sound control: data is sent on a rising bit 1
         uint32_t prev = hw.sound_control;
         hw.sound_control = val;
         if (!(prev & 2) && (val & 2)) sound_data_w((uint16_t)hw.sound_data);
         return;
     }
-    case 0x10000088: return;
+    if (a == game.io.p2) { hw.sound_reset = val; sound_reset_w(val & 1); return; }
+    if (a == game.io.p1) { hw.vram_control = val; return; }
+    if (a == game.io.unused) { hw.sound_data = val; return; }
+    if (a == game.io.coin) { hw.coin_control = val; return; }
+    if (a == game.io.dsw || (game.io.nop && a == game.io.nop)) return;
+    switch (a) {
     case 0x10000000: return;   // written 1 at boot (board control/watchdog)
     case 0x10000178: return;   // IDE cs1 reg 7 (drive address), unused
-    case 0x10000090: hw.sound_reset = val; sound_reset_w(val & 1); return;
-    case 0x10000098: hw.vram_control = val; return;
-    case 0x100000a0: hw.sound_data = val; return;
-    case 0x100000b0: return;
-    case 0x100000b8: hw.coin_control = val; return;
     case 0x10000170: ide_devctl(val); return;
     }
     if (a >= 0x10000100 && a < 0x10000140) { ide_write((a - 0x10000100) >> 3, val); return; }
