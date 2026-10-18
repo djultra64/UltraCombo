@@ -52,7 +52,8 @@ typedef struct {
     bool training;             // health refill + timer freeze
     // the board's DIP switches
     bool free_play;
-    char version[16];            // game version label (game.versions); empty = the default
+    char version[16];
+    int  blood_colour;           // 0 red, 1 white (games with that switch)            // game version label (game.versions); empty = the default
     int  blood;                // 0 none, 1 low, 2 medium, 3 high
     bool finishing_moves, demo_sounds;
     char net_address[1024];    // last host joined

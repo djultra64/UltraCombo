@@ -24,6 +24,7 @@ typedef struct {
 static const char *const scale_names[] = { "fit", "integer", "stretch", 0 };
 static const char *const pacing_names[] = { "auto", "audio", "vsync", 0 };
 static const char *const blood_names[] = { "none", "low", "medium", "high", 0 };
+static const char *const blood_colour_names[] = { "red", "white", 0 };
 static const char *const filter_names[] = { "sharp", "smooth", "scanlines", "crt", 0 };
 
 static const char *const button_names[NBUTTONS] = {
@@ -102,10 +103,17 @@ static void build_table(void)
     add("system", "mute_unfocused", T_BOOL, &cfg.mute_unfocused, "no", "mute while the window is in the background", 0);
     add("system", "boot_skip_frames", T_INT, &cfg.boot_skip_frames, "90",
         "fast-forward this many frames at startup (90 = blank boot screens, 1000 = to the K2 logo)", 0);
-    add("system", "auto_coin", T_BOOL, &cfg.auto_coin, "yes", "Start inserts coins when there are not enough credits", 0);
+    if (game.credits)                      // games where auto-coin knows the credit count
+        add("system", "auto_coin", T_BOOL, &cfg.auto_coin, "yes", "Start inserts coins when there are not enough credits", 0);
     add("system", "fast_forward_speed", T_INT, &cfg.fast_speed, "0", "fast-forward limit in x realtime, 0 = as fast as possible", 0);
-    add("system", "run_ahead", T_INT, &cfg.run_ahead, "0",
-        "0-2: hide the game's built-in input lag (1 frame) by emulating ahead; 1 is enough, 2 needs a fast CPU", 0);
+    static char runahead_help[200];
+    if (game.input_lag)
+        snprintf(runahead_help, sizeof runahead_help, "0-2: hide the game's built-in input lag (%d frame%s) by "
+                 "emulating ahead; %d is enough, more needs a fast CPU", game.input_lag, game.input_lag > 1 ? "s" : "", game.input_lag);
+    else
+        snprintf(runahead_help, sizeof runahead_help, "0-2: emulate ahead to show input sooner; this game has no "
+                 "input lag of its own, so 0 is as the arcade played");
+    add("system", "run_ahead", T_INT, &cfg.run_ahead, "0", runahead_help, 0);
     add("system", "rewind", T_BOOL, &cfg.rewind, "yes", "keep a rewind history (hold the rewind hotkey)", 0);
     add("system", "rewind_mb", T_INT, &cfg.rewind_mb, "256", "memory for it; about 85 KB per frame (256 MB = ~50 s)", 0);
     add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
@@ -120,6 +128,8 @@ static void build_table(void)
     add_str("game", "version", cfg.version, game.versions[0].label, version_help);
     add("game", "free_play", T_BOOL, &cfg.free_play, "yes", "no coins needed: just press Start (the board's coinage DIP switch)", 0);
     add("game", "blood", T_ENUM, &cfg.blood, "high", "none, low, medium, high", blood_names);
+    if (game.has_blood_colour)
+        add("game", "blood_colour", T_ENUM, &cfg.blood_colour, "red", "red or white", blood_colour_names);
     add("game", "finishing_moves", T_BOOL, &cfg.finishing_moves, "yes", "Ultra combos and No Mercy finishers", 0);
     add("game", "demo_sounds", T_BOOL, &cfg.demo_sounds, "yes", "sound during the attract mode", 0);
     add_str("netplay", "address", cfg.net_address, "", "host to join (name or IP, optionally :port)");
@@ -298,5 +308,6 @@ uint32_t config_dsw(void)
     if (!cfg.demo_sounds) d &= ~0x04u;
     if (!cfg.finishing_moves) d &= ~0x08u;
     if (cfg.free_play) d = (d & ~0x3e00u) | 0x3000u;          // USA - free play
+    if (game.has_blood_colour && cfg.blood_colour == 1) d &= ~0x20u;
     return d;
 }

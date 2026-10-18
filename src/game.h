@@ -37,6 +37,8 @@ typedef struct {
     struct { uint32_t p1, p2, volume, unused, dsw, coin, nop; } io;   // nop: written, ignored
 
     int snapshot_frames;        // the game has loaded all of its code by then
+    int input_lag;              // frames the game itself waits before acting on input
+    bool has_blood_colour;      // DIP switch 6: red or white blood (KI1)
 
     // Game RAM locations, as offsets into ram2; 0 = not known for this game,
     // and the features using them are off.
@@ -48,8 +50,13 @@ typedef struct {
     uint32_t timer_tick, timer_ones, timer_tens;   // round clock
     uint32_t vars, vars_len;    // range of game variables for netplay's quick check
 
-    // Operator adjustments block on the disk; adj_len 0 = not known.
-    uint32_t adj_block, adj_len, adj_difficulty;
+    // Operator adjustments on the disk: adj_len bytes at adj_data, the first
+    // set once they were edited, with the game's checksum of them at adj_sum.
+    // adj_len 0 = not known. KI1 keeps that checksum in two header sectors
+    // instead (at +4), each with a generation count (+0, +0x1fc) and a
+    // checksum of its own first 0x1f8 bytes (+0x1f8).
+    uint32_t adj_sum, adj_data, adj_len, adj_difficulty;
+    uint32_t adj_headers[2];
 } game_t;
 
 extern const game_t game;

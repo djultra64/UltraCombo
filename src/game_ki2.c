@@ -24,6 +24,7 @@ const game_t game = {
             .unused = 0x100000a0, .dsw = 0x10000088, .coin = 0x100000b8, .nop = 0x100000b0 },
 
     .snapshot_frames = 900,
+    .input_lag = 1,
 
     .credits = 0x7ff124, .credits_needed = 2,
     .health_p1 = 0x7fc105, .health_step = 0x100, .health_max = 120,
@@ -32,5 +33,5 @@ const game_t game = {
 
     // checksum of the 88 bytes after it, computed by the game at 0x8802d400;
     // +4 is set once the adjustments were edited
-    .adj_block = 0xa00, .adj_len = 88, .adj_difficulty = 0xa1c,
+    .adj_sum = 0xa00, .adj_data = 0xa04, .adj_len = 88, .adj_difficulty = 0xa1c,
 };

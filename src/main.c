@@ -25,6 +25,7 @@
 #include "recomp.h"
 #include "rec_build.h"
 #include "game.h"
+#include "training.h"
 
 #define CPU_HZ        100000000
 #define LINES         261
@@ -679,6 +680,7 @@ int main(int argc, char **argv)
         for (int f = (int)machine_frame() + 1; f <= headless; f++) {
             if (trace_from && f == trace_from) cpu_trace = true;
             apply_script(f);
+            if (getenv("KI2_TRAINING")) { cfg.training = true; training_apply(true); }   // testing
             uint64_t t0 = SDL_GetPerformanceCounter();
             run_frame();
             state_checkpoint();
@@ -714,9 +716,16 @@ int main(int argc, char **argv)
                 }
                 acc_ms = max_ms = 0;
             }
-            if (getenv("KI2_DUMP_AT") && f == atoi(getenv("KI2_DUMP_AT"))) {
-                FILE *o = fopen("ram0.bin", "wb"); fwrite(ram0, 1, RAM0_SIZE, o); fclose(o);
-                o = fopen("ram2.bin", "wb"); fwrite(ram2, 1, RAM2_SIZE, o); fclose(o);
+            if (getenv("KI2_DUMP_AT")) {        // F: ram0.bin/ram2.bin at frame F; F1,F2,...: ram2_<F>.bin
+                const char *l = getenv("KI2_DUMP_AT");
+                bool list = strchr(l, ',') != NULL;
+                for (const char *q = l; *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : q + strlen(q)) {
+                    if (atoi(q) != f) continue;
+                    char n0[32] = "ram0.bin", n2[32] = "ram2.bin";
+                    if (list) { snprintf(n0, sizeof n0, "ram0_%05d.bin", f); snprintf(n2, sizeof n2, "ram2_%05d.bin", f); }
+                    FILE *o = fopen(n0, "wb"); fwrite(ram0, 1, RAM0_SIZE, o); fclose(o);
+                    o = fopen(n2, "wb"); fwrite(ram2, 1, RAM2_SIZE, o); fclose(o);
+                }
             }
             if (wav) {
                 int16_t buf[4096]; int n;

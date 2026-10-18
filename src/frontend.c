@@ -484,7 +484,7 @@ enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_
 // Controls
 enum { C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_BACK, C_COUNT };
 // Game & system
-enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_DIFFICULTY, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_DIFFICULTY, S_FREEPLAY, S_BLOOD, S_BLOODCOL, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
 // Practice
 enum { T_TRAINING, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
 // Netplay
@@ -581,6 +581,16 @@ static void apply_fullscreen_mode(void)
 }
 
 /* --- drawing --- */
+
+// Rows that don't apply to this game.
+static bool row_hidden(int row)
+{
+    if (menu_page != PG_GAME) return false;
+    if (row == S_AUTOCOIN) return !game.credits;
+    if (row == S_BLOODCOL) return !game.has_blood_colour;
+    if (row == S_DIFFICULTY) return !game.adj_len;
+    return false;
+}
 
 static int page_count(void)
 {
@@ -716,6 +726,7 @@ static void draw_menu(uint32_t *out)
         if (dl > 0 && dl != boot_difficulty) foot = "CHANGES APPLY ON RESET GAME";
         snprintf(b[S_FREEPLAY], 72, "Free play\t%s%s", onoff[cfg.free_play], pending ? " (on reset)" : "");
         snprintf(b[S_BLOOD], 72, "Blood\t< %s >%s", blood_names[cfg.blood & 3], pending ? "*" : "");
+        snprintf(b[S_BLOODCOL], 72, "Blood colour\t< %s >%s", cfg.blood_colour ? "White" : "Red", pending ? "*" : "");
         snprintf(b[S_FINISH], 72, "Finishing moves\t%s", onoff[cfg.finishing_moves]);
         snprintf(b[S_DEMO], 72, "Attract-mode sound\t%s", onoff[cfg.demo_sounds]);
         snprintf(b[S_AUTOCOIN], 72, "Auto-coin\t%s", cfg.free_play ? "(free play)" : onoff[cfg.auto_coin]);
@@ -749,8 +760,13 @@ static void draw_menu(uint32_t *out)
         foot = editing >= 0 ? "TYPE, THEN ENTER   ESC CANCELS" : netplay_active() ? netplay_status() : foot;
         break;
     }
-    for (int i = 0; i < n; i++) items[i] = b[i];
-    osd_menu(out, title, items, n, menu_sel, foot);
+    int shown = 0, sel = 0;
+    for (int i = 0; i < n; i++) {
+        if (row_hidden(i)) continue;
+        if (i == menu_sel) sel = shown;
+        items[shown++] = b[i];
+    }
+    osd_menu(out, title, items, shown, sel, foot);
 }
 
 /* --- actions --- */
@@ -953,6 +969,7 @@ static void menu_change(int dir)
         }
         case S_FREEPLAY: cfg.free_play = !cfg.free_play; break;     // the game reads its switches at power-on
         case S_BLOOD: cycle(&cfg.blood, 4, d); break;
+        case S_BLOODCOL: cfg.blood_colour = !cfg.blood_colour; break;
         case S_FINISH: cfg.finishing_moves = !cfg.finishing_moves; break;
         case S_DEMO: cfg.demo_sounds = !cfg.demo_sounds; break;
         case S_AUTOCOIN: cfg.auto_coin = !cfg.auto_coin; break;
@@ -1019,7 +1036,13 @@ static void menu_back(void)
 
 static void menu_nav(int up_down, int left_right, bool enter, bool back)
 {
-    if (up_down) cycle(&menu_sel, page_count(), up_down);
+    if (up_down) {
+        int n = page_count();
+        for (int k = 0; k < n; k++) {               // skip rows this game doesn't have
+            cycle(&menu_sel, n, up_down);
+            if (!row_hidden(menu_sel)) break;
+        }
+    }
     if (left_right) menu_change(left_right);
     if (enter) menu_change(0);
     if (back) menu_back();
