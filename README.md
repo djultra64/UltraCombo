@@ -1,53 +1,60 @@
-# UltraCombo 2
+# UltraCombo
 
-A native port for the Killer Instinct 2 arcade game.
+Native PC ports of the Killer Instinct arcade games, for Windows and Linux:
 
-Runs the arcade game's own code (statically recompiled to C) on Linux and
-Windows, with the Midway DCS sound board and IDE hard disk emulated. You
-need your own copies of the game data; none are included.
+| | Plays | MAME set | Versions |
+|---|---|---|---|
+| **UltraCombo** | Killer Instinct (1994) | `kinst` | L1.5D (default), L1.4 |
+| **UltraCombo 2** | Killer Instinct 2 (1996) | `kinst2` | L1.4 |
+
+Both are one program. It runs the arcade games' own code, translated to C
+for your PC, with the board around it emulated: the Midway DCS sound board
+and the IDE hard disk. On top come the things a home version needs: shaders
+and CRT looks, rebindable controls and gamepads, save states, rewind,
+run-ahead, training mode and rollback netplay.
+
+**No game files are included.** You need your own copies of the arcade
+games' files: the ROMs and the hard disk image (CHD) of MAME's sets.
 
 ## Setup
 
-Put these in `run/` (or point `ki2.ini` at them). They are the files of
-MAME's `kinst2` set:
+Put the files of one game or both in `run/`, the files of MAME's sets as
+they come:
 
-- `ki2-l14.u98`: boot ROM
-- `kinst2.chd`: the hard disk, MAME's CHD as it is. It can also sit in a
-  `kinst2/` folder inside `run/`, the way MAME keeps it. A raw image
-  (`kinst2.raw`, from `chdman extractraw`) works too, and is used if both
-  are there.
+**Killer Instinct** (`kinst`):
+
+- `ki-l15d.u98`: boot ROM, version L1.5D; `ki-l14.u98` (L1.4) is optional
+- `u10-l1` … `u13-l1`, `u33-l1` … `u36-l1`: sound ROMs
+- `kinst.chd`: the hard disk
+
+**Killer Instinct 2** (`kinst2`):
+
+- `ki2-l14.u98`: boot ROM, version L1.4
 - `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36`: sound ROMs
+- `kinst2.chd`: the hard disk
 
-The disk image is only ever read. The game's settings, audits and high
-scores (its first 32 KB) go to `saves/ki2-l14.settings`, one file per game
-version. A raw image that earlier versions of this program wrote to keeps
-its settings: they are copied into that file on the first launch. At startup
-the program compares the files with MAME's good dumps, and warns if one
-doesn't match. `ultracombo2 --write-raw kinst2.raw` writes the disk out as a
-raw image, the same as `chdman extractraw`, if you ever need one.
+The two games' file names don't clash. A CHD can also sit in a folder named
+after its set (`run/kinst/kinst.chd`, `run/kinst2/kinst2.chd`), the way MAME
+keeps it. A raw disk image (`kinst.raw`, `kinst2.raw`, from `chdman
+extractraw`) works too, and is used if both are there. Each game's file
+paths can also be set in its settings file (`ki1.ini`, `ki2.ini`).
+
+The disk images are only ever read. A game's settings, audits and high
+scores (the first 32 KB of its disk) go to `saves/<boot ROM>.settings`, one
+file per game version. A raw image that an earlier version of this program
+wrote to keeps its settings: they are copied into that file on the first
+launch. `ultracombo --game ki2 --write-raw kinst2.raw` writes a disk out as
+a raw image, the same as `chdman extractraw`, if you ever need one.
 
 ### Checking your files
 
-These are the files of MAME's `kinst2` and `kinst` sets (the dumps MAME
-lists as good). Check yours with `md5sum` (Linux), `certutil -hashfile FILE
-MD5` (Windows) or any ROM manager. Every ROM is 524,288 bytes.
+These are the files of MAME's `kinst` and `kinst2` sets (the dumps MAME
+lists as good). At startup the program compares your files with them and
+warns, naming the file, if one doesn't match. To check them yourself use
+`md5sum` (Linux), `certutil -hashfile FILE MD5` (Windows) or any ROM
+manager. Every ROM is 524,288 bytes.
 
-**UltraCombo 2 (Killer Instinct 2):**
-
-| File | What | MD5 | SHA1 |
-|---|---|---|---|
-| `ki2-l14.u98` | boot ROM, L1.4 | `8681c9d373394b17f3499e8902055dab` | `aa7a2a9d72a47dd0ea2ee7b2776b79288060b179` |
-| `ki2_l1.u10` | sound | `fa0c7f9dc7ee0995913a4769996a7d80` | `acfc9460cd5df01403b7f00b2f68c2a8734ad6d3` |
-| `ki2_l1.u11` | sound | `dc87ed16f9d95cb0aa0ea0117ef4be09` | `fe7fc78f1c60b15f2bbdc4c455f55cdf30f48ed4` |
-| `ki2_l1.u12` | sound | `0b034258a8561ac4bfa339a781777c4a` | `9997a83432cb720f65b40a8af46f31a5d0d16d8e` |
-| `ki2_l1.u13` | sound | `6d42f7de396c7f9eb760e51af4fcdca2` | `7ff164fc2f079d039921594be92208973d43aa03` |
-| `ki2_l1.u33` | sound | `aae93e81ac881c56d0aecab2f59c8797` | `0ab6dbfb76e9fa2db072e287864ad1f9d514dd9b` |
-| `ki2_l1.u34` | sound | `116cbfd189879a3a601f1f7ccb64285c` | `48456a7b6592c40bc9c664dcd2ee2cfd91942811` |
-| `ki2_l1.u35` | sound | `ec3103d67a528412da9cb91a2729df65` | `24a3ff009c8a7f5a0bfcb198b8dcb5df365770d3` |
-| `ki2_l1.u36` | sound | `a03144702e28a9e89e50c5a377cb47b3` | `0fca72c40067034939b984b4bf32972a5a6c26af` |
-| `kinst2.raw` | disk, freshly extracted | `2563b089b316f2c8636d78af661ac656` | `ab0242233d2eaf9d907abe246a54e09a8a2561a5` |
-
-**UltraCombo (Killer Instinct), in development:**
+**Killer Instinct:**
 
 | File | What | MD5 | SHA1 |
 |---|---|---|---|
@@ -63,86 +70,64 @@ MD5` (Windows) or any ROM manager. Every ROM is 524,288 bytes.
 | `u36-l1` | sound | `57b73bec5d0e8c90d8898e102ce4066b` | `cc78070cc41701e9a91fde5cfbdc7e1e83354854` |
 | `kinst.raw` | disk, freshly extracted | `6d4c2f152c9a18ab3a9b05b8804306a8` | `a37a2c5e52ea936a715210d237874dd573bb002f` |
 
+**Killer Instinct 2:**
+
+| File | What | MD5 | SHA1 |
+|---|---|---|---|
+| `ki2-l14.u98` | boot ROM, L1.4 | `8681c9d373394b17f3499e8902055dab` | `aa7a2a9d72a47dd0ea2ee7b2776b79288060b179` |
+| `ki2_l1.u10` | sound | `fa0c7f9dc7ee0995913a4769996a7d80` | `acfc9460cd5df01403b7f00b2f68c2a8734ad6d3` |
+| `ki2_l1.u11` | sound | `dc87ed16f9d95cb0aa0ea0117ef4be09` | `fe7fc78f1c60b15f2bbdc4c455f55cdf30f48ed4` |
+| `ki2_l1.u12` | sound | `0b034258a8561ac4bfa339a781777c4a` | `9997a83432cb720f65b40a8af46f31a5d0d16d8e` |
+| `ki2_l1.u13` | sound | `6d42f7de396c7f9eb760e51af4fcdca2` | `7ff164fc2f079d039921594be92208973d43aa03` |
+| `ki2_l1.u33` | sound | `aae93e81ac881c56d0aecab2f59c8797` | `0ab6dbfb76e9fa2db072e287864ad1f9d514dd9b` |
+| `ki2_l1.u34` | sound | `116cbfd189879a3a601f1f7ccb64285c` | `48456a7b6592c40bc9c664dcd2ee2cfd91942811` |
+| `ki2_l1.u35` | sound | `ec3103d67a528412da9cb91a2729df65` | `24a3ff009c8a7f5a0bfcb198b8dcb5df365770d3` |
+| `ki2_l1.u36` | sound | `a03144702e28a9e89e50c5a377cb47b3` | `0fca72c40067034939b984b4bf32972a5a6c26af` |
+| `kinst2.raw` | disk, freshly extracted | `2563b089b316f2c8636d78af661ac656` | `ab0242233d2eaf9d907abe246a54e09a8a2561a5` |
+
 The raw disk checksums are for an image straight from the CHD. This program
 never writes to it, but earlier versions did, and so do other programs that
 use raw images; an image that has been played on no longer matches. To check
-a disk, check the CHD instead. A CHD file's own MD5 depends on the chdman version that made it, so
-compare the SHA1 that `chdman info -i FILE` prints as "SHA1" (the one MAME
-uses):
+a disk, check the CHD instead. A CHD file's own MD5 depends on the chdman
+version that made it, so compare the SHA1 that `chdman info -i FILE` prints
+as "SHA1" (the one MAME uses):
 
 | CHD | SHA1 (from `chdman info`) | MD5 of MAME's current file |
 |---|---|---|
 | `kinst2.chd` | `e7c9291b4648eae0012ea0cc230731ed4987d1d5` | `5970ca942c0c7c5f62f651bf93e15dc5` |
 | `kinst.chd` | `81d833236e994528d1482979261401b198d1ca53` | `a542547abdff0a28df440c3a4d1cfdde` |
 
-Then start `ultracombo2` (`UltraCombo2.exe` on Windows). On the first launch
-the program shows "PREPARING THE GAME FOR THIS PC": it boots your game files
-on its interpreter until the game has loaded its code, snapshots that code,
+### Starting
+
+Start `ultracombo` (`UltraCombo.exe` on Windows; the AppImage on Linux).
+With both games installed it asks which to play: left/right (or a click)
+chooses, Enter or A starts. It remembers the last choice. With one game
+installed it starts that one straight away. Menu → **Change game** goes back
+to the choice, and `--game ki1` or `--game ki2` skips it (for shortcuts).
+
+The first time you play each game, and each version of it, the program shows
+"PREPARING THE GAME FOR THIS PC": it boots your game files on its
+interpreter until the game has loaded its code, snapshots that code,
 translates it to C and compiles it into a native module. That takes about a
 minute, once; the module is cached in `cache/` (a new one is made if the
 game files change). The compiler used is the first that works of:
 
-1. Zig, bundled in `tools/zig` — what the release packages use
+1. Zig, bundled in `tools/zig`, which the release packages include
 2. a C compiler already installed (`cc`, `gcc` or `clang`)
-3. TinyCC, bundled in `tools/tcc` — builds in seconds, but its code runs at
-   roughly half the speed (still well above full speed on most PCs)
+3. TinyCC, bundled in `tools/tcc`: it builds in seconds, but its code runs
+   at roughly half the speed (still well above full speed on most PCs)
 
 If none works the game runs on the interpreter, with a warning; see
-`build.log` in `cache/src-*/`. All three produce code that behaves identically, so
-netplay works between them.
+`build.log` in `cache/src-*/`. All three produce code that behaves
+identically, so netplay works between them.
 
-Settings, the game's saves, the log, screenshots, states and the cache are
-written next to the program if that folder is writable, else into the user
-data folder
-(`%APPDATA%\UltraCombo2\` on Windows, `~/.local/share/UltraCombo2/` on
-Linux), whose `run/` folder is also searched for the game files.
-
-### Building
-
-Needs gcc, SDL2 and python3:
-
-    make            # the program; builds the game code at first launch
-    make recomp     # developers: link the game code in instead (a minute)
-    ./ultracombo2
-
-`make recomp` puts the generated C in `build/rec/`, derived from your ROM;
-that binary contains game code and must not be shared.
-
-### Windows
-
-Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
-official SDL2 MinGW package, unpacked into `deps/sdl2-mingw/`:
-
-    make windows    # -> dist/windows/UltraCombo2.exe + SDL2.dll
-
-On Windows the log goes to `ki2.log` beside the executable. Linux and
-Windows builds emulate identically (same state after the same inputs).
-
-### Release packages
-
-    make packages   # -> dist/UltraCombo2-Linux.tar.xz, dist/UltraCombo2-x86_64.AppImage,
-                    #    dist/UltraCombo2-Windows.zip
-
-These hold the program, Zig and TinyCC, shaders and licences — no game files
-and no game code. They expect, in `deps/`: Zig 0.17 for Linux and Windows
-(`zig-linux/`, `zig-windows/`), TinyCC's `libtcc.so` built with that Zig
-against glibc 2.31 (`tcc-lnx231/`) and `libtcc.dll` (`tcc-win/`). The Linux
-program is built with Zig against glibc 2.31 too, so it runs on distributions
-from about 2020 on, and so is SDL2 2.32.10 (from its source release, into
-`deps/sdl2-lnx/build`; configure with `-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu`
-and `-idirafter /usr/include` so it finds the X11/Wayland/audio headers),
-which ships in `lib/`.
-
-    make package-appimage   # -> dist/UltraCombo2-x86_64.AppImage
-
-The AppImage is the Linux package plus AppImage's static runtime
-(`deps/dl/appimage-runtime/runtime-x86_64`, from
-github.com/AppImage/type2-runtime), packed with `mksquashfs`. Players make a
-`run/` folder beside the `.AppImage` for the game files; settings and the
-cache then go there too. Without one, the user data folder is used.
-
-"Killer Instinct" is a trademark of its owners; this project is not
-affiliated with them. Keep that in mind when naming anything you publish.
+Settings (`ki1.ini`, `ki2.ini`), the games' saves, the logs, screenshots,
+states and the cache are written next to the program if that folder is
+writable, else into the user data folder (`%APPDATA%\UltraCombo\` on
+Windows, `~/.local/share/UltraCombo/` on Linux), whose `run/` folder is also
+searched for the game files. With the AppImage, make a `run/` folder beside
+the `.AppImage`: the game files go in it, and settings and the cache go
+beside the AppImage too.
 
 ## Controls
 
@@ -154,14 +139,11 @@ affiliated with them. Keep that in mind when naming anything you publish.
 | Start | 1 | 2 | Start |
 | Coin | 5 | 6 | Back |
 
-The game runs in **free play** by default (the board's coinage DIP
+The games run in **free play** by default (the board's coinage DIP
 switch): from the attract demo, the first Start goes to the title screen
-and the second starts the game, as on a free-play cabinet. With free play
-off, `auto_coin` makes Start insert the coins it needs. Blood level,
-finishing moves and demo sounds are in `ki2.ini` too ([game]); the game
-reads these switches at power-on, so changes apply after Reset.
-
-The first pad connected is player 1, the second player 2.
+and the second starts the game, as on a free-play cabinet. In UltraCombo 2,
+with free play off, `auto_coin` makes Start insert the coins it needs. The
+first pad connected is player 1, the second player 2.
 
 | Hotkey | |
 |---|---|
@@ -183,21 +165,46 @@ The first pad connected is player 1, the second player 2.
 | 9 | Service credit |
 | Page Up / Page Down | The cabinet's own volume buttons |
 
-The menu has save/load, run-ahead, rewind, training, input display, video,
-volume and auto-coin settings, Reset and Quit; changes are saved to
-`ki2.ini` when it closes.
+Each game keeps its own settings; changes made in the menu are saved to its
+`.ini` file when the menu closes.
+
+## The menu
+
+**Graphics:** fullscreen (borderless, or exclusive at a chosen display
+mode), window size, scaling (fit 4:3, integer, stretch), shader, shader
+parameters, frame pacing and the performance overlay.
+
+**Controls:** rebind both players' keys, the gamepad buttons and all hotkeys
+(select one, press the new key or button; Backspace unbinds). Also there:
+**left+right = neutral** (SOCD cleaning, on by default: left and right
+together count as neither, up and down together as up, like fight sticks),
+**rumble** when your character is hit, and the stick deadzone.
+
+**Game & system:**
+
+- **Game version** (Killer Instinct: L1.5D or L1.4, when both boot ROMs are
+  there): pick it, then Enter switches. That resets the game, like swapping
+  the ROM on the cabinet; each version keeps its own settings and high
+  scores. L1.4 is the original release, with the bugs and infinite combos
+  that L1.5D fixed.
+- **CPU difficulty** (Extra easy to Extra hard): written to the disk's
+  adjustments exactly as the game's operator menu does, so it applies after
+  Reset.
+- **Free play, blood level, finishing moves, attract-mode sound** and, in
+  Killer Instinct, **blood colour** (red or white): the board's DIP
+  switches, read at power-on, so they apply after Reset.
+- Volume, mute or pause in the background, auto-coin (UltraCombo 2),
+  run-ahead and rewind.
+
+The window's size and position are remembered between runs.
 
 ## Graphics
 
-Menu → Graphics: fullscreen (borderless, or exclusive at a chosen display
-mode), window size, scaling (fit 4:3, integer, stretch), shader, shader
-parameters and frame pacing.
-
 **Shaders** are drawn by the GPU. Four are built in:
 
-- **Sharp** — crisp pixels, evenly sized at any window size
-- **Smooth** — sharpened bicubic; suits KI2's pre-rendered 3D art
-- **Scanlines**, **CRT** — simple, fast CRT looks
+- **Sharp**: crisp pixels, evenly sized at any window size
+- **Smooth**: sharpened bicubic; suits the games' pre-rendered 3D art
+- **Scanlines**, **CRT**: simple, fast CRT looks
 
 Any **libretro GLSL preset** (`.glslp`, the format of RetroArch's shader
 collection) under `shaders/` works too, multi-pass presets, lookup
@@ -206,37 +213,22 @@ ScaleFX and xBR. `make shaders-extra` adds xBRZ, crt-guest-dr-venom,
 crt-royale, crt-geom, crt-easymode, zfast-crt and crt-aperture (GPL
 licensed, kept as separate files in `shaders/extra/`). Each preset's
 `#pragma parameter` settings can be adjusted live in Shader parameters, and
-are remembered. `ultracombo2 --test-shaders` checks that every preset compiles.
+are remembered. `ultracombo --test-shaders` checks that every preset
+compiles.
 
 Without OpenGL the game falls back to plain SDL drawing (sharp or smooth).
 
-## Controls page
-
-Menu → Controls rebinds both players' keys, the gamepad buttons and all
-hotkeys (select one, press the new key or button; Backspace unbinds).
-Also there: **left+right = neutral** (SOCD cleaning, on by default: left and
-right together count as neither, up and down together as up, like fight
-sticks), **rumble** when your character is hit, and the stick deadzone.
-
-Game & system has volume, mute/pause while the window is in the background,
-the **CPU difficulty** (Extra easy to Extra hard; written to the disk's
-adjustments exactly as the operator menu does, so it applies after Reset),
-the DIP switch settings, auto-coin, run-ahead and rewind. F10 (or
-Graphics → Performance overlay) shows frame rate, emulation time and speed,
-and the audio buffer. The window's size
-and position are remembered between runs.
-
 ## Training mode
 
-Turn it on with F4 or in the menu. Health refills a moment after each
+Turn it on with F4 or in Menu → Practice. Health refills a moment after each
 combo ends (so you can still read the damage) and the round clock stops.
+In Killer Instinct this works on each of a fighter's two health bars.
 
-For a sparring partner, start a two-player game (press 2 to join; auto-coin
-pays), then:
+For a sparring partner, start a two-player game (press 2 to join), then:
 
-1. **F8** — record: your controls now drive player 2 (up to 10 seconds).
-2. **F8** — stop recording.
-3. **F9** — the dummy repeats the recording on a loop; F9 again stops it.
+1. **F8**: record. Your controls now drive player 2 (up to 10 seconds).
+2. **F8**: stop recording.
+3. **F9**: the dummy repeats the recording on a loop; F9 again stops it.
 
 Directions are recorded as pressed (left/right on screen), so record from
 the side the dummy will be on.
@@ -250,13 +242,14 @@ Two players over the internet with rollback netcode: your own inputs
 respond immediately, the opponent's are predicted and corrected, and the
 game stays perfectly in sync. Linux and Windows can play each other.
 
-- **Host:** menu → Netplay → *Host a game* (or `ultracombo2 --host`). Your UDP port
-  (`port` in ki2.ini, default 7845) must be reachable: forward it on your
-  router, or both use a VPN such as Tailscale or ZeroTier.
-- **Join:** menu → Netplay → *Address* (type the host's IP or name), then
-  *Join a game* (or `ultracombo2 --join HOST[:PORT]`).
+- **Host:** Menu → Netplay → *Host a game* (or `ultracombo --game ki2
+  --host`). Your UDP port (`port` in the game's `.ini`, default 7845) must
+  be reachable: forward it on your router, or both use a VPN such as
+  Tailscale or ZeroTier.
+- **Join:** Menu → Netplay → *Address* (type the host's IP or name), then
+  *Join a game* (or `ultracombo --game ki2 --join HOST[:PORT]`).
 
-Both players need the same build, ROM and disk image (checked when
+Both players need the same game, version, ROM and disk image (checked when
 connecting); the host's settings sectors and DIP switches are used. When
 the other player connects, both games restart at the title screen. You
 play with your usual controls whichever side you are on. The corner shows
@@ -269,34 +262,87 @@ sides run at the arcade's 58.96 Hz.
 
 ## Save states, rewind and run-ahead
 
-States go to `states/slot1.ki2s` … `slot9.ki2s` (about 6 MB each). They
-include the disk's settings sectors, and only load into the same build and
-ROM version.
+States go to `states/slot1.ki1s` … `slot9.ki1s` (Killer Instinct) and
+`slot1.ki2s` … `slot9.ki2s` (Killer Instinct 2), about 6 MB each. They
+include the disk's settings sectors, and only load into the same build,
+game and version.
 
 Rewind keeps about 50 seconds by default (`rewind_mb = 256`).
 
-KI2 shows the result of an input one frame after it is read. Run-ahead 1
-hides that frame by quietly emulating one frame ahead each frame. It costs
-about one extra frame of CPU time; 2 frames is possible on a fast CPU but
-does not remove any more of this game's lag.
+Killer Instinct 2 shows the result of an input one frame after it reads it.
+Run-ahead 1 hides that frame by quietly emulating one frame ahead each frame;
+it costs about one extra frame of CPU time. Killer Instinct has no such lag
+(a press shows on the very next frame), so run-ahead is off by default for
+both, as the arcade played.
 
-Everything above can be changed in `ki2.ini`, which is written with
-comments on first run. It also has video scaling (`fit`, `integer`,
-`stretch`), smoothing, frame pacing, audio latency and the boot skip.
+Everything above can be changed in the games' `.ini` files, which are
+written with comments on first run. They also have video scaling (`fit`,
+`integer`, `stretch`), smoothing, frame pacing, audio latency and the boot
+skip.
 
 ## Frame pacing
 
-The game runs at 58.96 Hz. With `pacing = auto` a ~60 Hz display is
-driven by vsync for perfectly smooth motion (the game runs 1.7% fast to
-match); other refresh rates are timed by the sound card at the original
-speed.
+The games run at 58.96 Hz. With `pacing = auto` a ~60 Hz display is driven
+by vsync for perfectly smooth motion (the game runs 1.7% fast to match);
+other refresh rates are timed by the sound card at the original speed.
+
+## Building
+
+Needs gcc, SDL2 and python3:
+
+    make            # ultracombo: both games; their code is built at first launch
+    ./ultracombo
+
+For developers, `make recomp` links Killer Instinct 2's translated code into
+the program instead (it boots your KI2 files once, about a minute). The
+generated C goes to `build/rec/`, derived from your ROM: that binary contains
+game code and must not be shared. `tools/regress.sh` runs a fixed scripted
+fight and prints a state hash, to check that a change doesn't alter
+emulation (see `CLAUDE.md`).
+
+### Windows
+
+Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
+official SDL2 MinGW package, unpacked into `deps/sdl2-mingw/`:
+
+    make windows    # -> dist/windows/UltraCombo.exe
+
+On Windows each game's log goes to `ki1.log` / `ki2.log` beside the
+executable. Linux and Windows builds emulate identically (same state after
+the same inputs).
+
+### Release packages
+
+    make packages   # -> dist/UltraCombo-Windows.zip, dist/UltraCombo-Linux.tar.xz,
+                    #    dist/UltraCombo-x86_64.AppImage
+
+These hold the program, Zig and TinyCC, SDL2 (Linux: in `lib/`), shaders and
+licences: no game files and no game code. They expect, in `deps/`:
+
+- Zig 0.17 for Linux and Windows (`zig-linux/`, `zig-windows/`);
+- TinyCC's `libtcc.so` built with that Zig against glibc 2.31
+  (`tcc-lnx231/`), and `libtcc.dll` (`tcc-win/`);
+- SDL2 2.32.10 built with that Zig against glibc 2.31 into
+  `deps/sdl2-lnx/build` (configure with
+  `-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu` and `-idirafter
+  /usr/include` so it finds the X11/Wayland/audio headers);
+- the SDL2 MinGW package (`sdl2-mingw/`);
+- AppImage's static runtime (`dl/appimage-runtime/runtime-x86_64`, from
+  github.com/AppImage/type2-runtime).
+
+The Linux program is built with Zig against glibc 2.31, so it runs on
+distributions from about 2020 on. The AppImage is the Linux package packed
+with `mksquashfs` behind that runtime.
+
+"Killer Instinct" is a trademark of its owners; this project is not
+affiliated with them. Keep that in mind when naming anything you publish.
 
 ## Licence
 
-UltraCombo 2 is MIT-licensed (`LICENSE`). That covers this project's own code
-only: the game, its code and its data belong to their owners, and you need
-your own copy. Bundled third-party parts keep their licences: stb_image
-(public domain / MIT), the shaders in `shaders/` (see `shaders/README.txt`),
-libchdr, which reads CHDs, with the decompressors it bundles (BSD, public
-domain, MIT; see `src/third_party/libchdr/SOURCE.txt`), and in the release
-packages SDL2 (zlib), Zig (MIT) and TinyCC (LGPL 2.1).
+UltraCombo is MIT-licensed (`LICENSE`). That covers this project's own code
+only: the games, their code and their data belong to their owners, and you
+need your own copies. Bundled third-party parts keep their licences:
+stb_image (public domain / MIT), the shaders in `shaders/` (see
+`shaders/README.txt`), libchdr, which reads CHDs, with the decompressors it
+bundles (BSD, public domain, MIT; see `src/third_party/libchdr/SOURCE.txt`),
+and in the release packages SDL2 (zlib), Zig (MIT) and TinyCC (LGPL 2.1).
