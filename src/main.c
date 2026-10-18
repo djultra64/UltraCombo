@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include "icon.h"
 #include "recomp.h"
 #include "rec_build.h"
@@ -48,24 +49,53 @@ const char *base_dir(void)
     return dir;
 }
 
+// Running as an AppImage: the folder holding the .AppImage file, else NULL.
+static const char *appimage_dir(void)
+{
+    static char dir[4096];
+    const char *p = getenv("APPIMAGE");
+    if (!p || !*p || strlen(p) >= sizeof dir) return NULL;
+    if (!*dir) {
+        strcpy(dir, p);
+        char *slash = strrchr(dir, '/');
+        if (slash) slash[1] = 0; else strcpy(dir, "./");
+    }
+    return dir;
+}
+
+static bool writable_dir(const char *dir)
+{
+    char probe[4200];
+    snprintf(probe, sizeof probe, "%s.ki2-write-test", dir);
+    FILE *f = fopen(probe, "wb");
+    if (!f) return false;
+    fclose(f);
+    remove(probe);
+    return true;
+}
+
 // Where settings, the cache, save states and screenshots go: beside the
-// executable when that folder is writable (portable use), otherwise the
-// user's own data folder (installed copies, AppImages).
+// executable when that folder is writable (portable use), beside an AppImage
+// that has a run/ folder next to it, otherwise the user's own data folder.
 const char *data_dir(void)
 {
     static char *dir;
     if (dir) return dir;
-    char probe[4200];
-    snprintf(probe, sizeof probe, "%s.ki2-write-test", base_dir());
-    FILE *f = fopen(probe, "wb");
-    if (f) { fclose(f); remove(probe); dir = SDL_strdup(base_dir()); return dir; }
+    if (writable_dir(base_dir())) { dir = SDL_strdup(base_dir()); return dir; }
+    const char *ai = appimage_dir();
+    if (ai) {
+        char run[4200];
+        snprintf(run, sizeof run, "%srun", ai);
+        struct stat st;
+        if (!stat(run, &st) && S_ISDIR(st.st_mode) && writable_dir(ai)) { dir = SDL_strdup(ai); return dir; }
+    }
     dir = SDL_GetPrefPath("KI2Port", "ki2");
     if (!dir) dir = SDL_strdup(base_dir());
     return dir;
 }
 
 // Use `name` if it exists, otherwise look beside the executable and in run/
-// there, then in run/ in the data folder.
+// there, in run/ beside an AppImage, then in run/ in the data folder.
 const char *find_data(const char *name, char *buf, size_t n)
 {
     if (readable(name)) return name;
@@ -73,6 +103,10 @@ const char *find_data(const char *name, char *buf, size_t n)
     if (readable(buf)) return buf;
     snprintf(buf, n, "%srun/%s", base_dir(), name);
     if (readable(buf)) return buf;
+    if (appimage_dir()) {
+        snprintf(buf, n, "%srun/%s", appimage_dir(), name);
+        if (readable(buf)) return buf;
+    }
     snprintf(buf, n, "%srun/%s", data_dir(), name);
     return readable(buf) ? buf : name;
 }
@@ -280,14 +314,18 @@ static void report(bool fatal, const char *fmt, ...)
 
 static const char *files_help(void)
 {
-    static char buf[1024];
+    static char buf[8400], where[8200];
+    if (appimage_dir() && strcmp(appimage_dir(), data_dir()))
+        snprintf(where, sizeof where, "a folder named run beside the AppImage:\n    %srun\nor:\n    %srun", appimage_dir(), data_dir());
+    else
+        snprintf(where, sizeof where, "\n    %srun", data_dir());
     snprintf(buf, sizeof buf,
-             "Put the game files in:\n    %srun\n(or set their paths in ki2.ini).\n\n"
+             "Put the game files in %s\n(or set their paths in ki2.ini).\n\n"
              "Needed:\n"
              "  ki2-l14.u98  - boot ROM\n"
              "  kinst2.raw  - hard disk, extracted from MAME's kinst2.chd with\n"
              "      chdman extractraw -i kinst2.chd -o kinst2.raw\n"
-             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", data_dir());
+             "  ki2_l1.u10 - u13, ki2_l1.u33 - u36  - sound ROMs", where);
     return buf;
 }
 
@@ -364,7 +402,12 @@ int main(int argc, char **argv)
             if (!ok) fprintf(stderr, "recomp: %s\n", err);
             return ok ? 0 : 1;
         }
-        else if (!strcmp(argv[i], "--write-icon") && i + 1 < argc) return icon_write_ico(argv[++i]) ? 0 : 1;
+        else if (!strcmp(argv[i], "--write-icon") && i + 1 < argc) {
+            const char *p = argv[++i];                  // .png: 256 pixels, else .ico
+            size_t n = strlen(p);
+            bool png = n > 4 && !strcmp(p + n - 4, ".png");
+            return (png ? icon_write_png(p, 256) : icon_write_ico(p)) ? 0 : 1;
+        }
         else if (!strcmp(argv[i], "--test-shaders")) { extern bool opt_test_shaders; opt_test_shaders = true; }
         else if (!strcmp(argv[i], "--join") && i + 1 < argc) { extern const char *opt_net_join; opt_net_join = argv[++i]; }
         else if (!strcmp(argv[i], "--net-host") && i + 1 < argc) net_host = argv[++i];

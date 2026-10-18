@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=KI2 Port
+Comment=Native port for the Killer Instinct 2 arcade game (bring your own game files)
+Exec=ki2
+Icon=ki2
+Categories=Game;ArcadeGame;
+Terminal=false

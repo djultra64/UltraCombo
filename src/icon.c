@@ -1,6 +1,7 @@
 // Program icon: gold "KI2" on a dark red rounded tile, built from the OSD font.
 #include "icon.h"
 #include "osd.h"
+#include "png.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -83,4 +84,12 @@ bool icon_write_ico(const char *path)
         for (int k = 0; k < (s + 31) / 32 * 4 * s; k++) fputc(0, f);   // AND mask: alpha does the work
     }
     return fclose(f) == 0;
+}
+
+bool icon_write_png(const char *path, int size)
+{
+    static uint32_t px[256 * 256];
+    if (size > 256) return false;
+    icon_pixels(px, size);
+    return png_write_argb(path, px, size, size);
 }

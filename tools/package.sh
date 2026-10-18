@@ -3,14 +3,33 @@
 # build the game code on the player's machine, shaders and licences.
 # No game files and no game code go in.
 #
-#   tools/package.sh linux   PROGRAM          -> dist/KI2-Port-Linux/
-#   tools/package.sh windows PROGRAM SDL2.dll -> dist/KI2-Port-Windows/
+#   tools/package.sh linux    PROGRAM libSDL2-2.0.so.0 -> dist/KI2-Port-Linux/
+#   tools/package.sh windows  PROGRAM SDL2.dll         -> dist/KI2-Port-Windows/
+#   tools/package.sh appimage RUNTIME                  -> dist/KI2-Port-x86_64.AppImage
+#     (from dist/KI2-Port-Linux; RUNTIME is AppImage's type2-runtime)
 set -e
 target=$1 prog=$2
+sdl_licence=deps/sdl2-lnx/SDL2-2.32.10/LICENSE.txt
 case $target in
 linux)   out=dist/KI2-Port-Linux   zig=deps/zig-linux   tcc=deps/tcc-lnx231 ;;
 windows) out=dist/KI2-Port-Windows zig=deps/zig-windows tcc=deps/tcc-win ;;
-*) echo "usage: $0 linux|windows PROGRAM [SDL2.dll]" >&2; exit 1 ;;
+appimage)
+    # an AppImage is the runtime followed by a squashfs of the program's folder
+    app=dist/KI2-Port.AppDir image=dist/KI2-Port-x86_64.AppImage
+    rm -rf "$app" "$image"
+    cp -r dist/KI2-Port-Linux "$app"
+    rm -rf "$app/run"                   # game files go beside the AppImage
+    ln -s ki2 "$app/AppRun"
+    "$app/ki2" --write-icon "$app/ki2.png"
+    ln -s ki2.png "$app/.DirIcon"
+    cp tools/ki2.desktop "$app/"
+    mksquashfs "$app" dist/appimage.sqfs -root-owned -noappend -quiet -comp zstd -Xcompression-level 19 -b 1M
+    cat "$prog" dist/appimage.sqfs > "$image"
+    chmod +x "$image"
+    rm -f dist/appimage.sqfs
+    echo "packaged $image ($(du -h "$image" | cut -f1))"
+    exit 0 ;;
+*) echo "usage: $0 linux|windows|appimage ..." >&2; exit 1 ;;
 esac
 
 rm -rf "$out"
@@ -50,11 +69,15 @@ if [ -d shaders/extra ]; then
     cp tools/gpl-3.0.txt "$out/licenses/GPL-3.0-shaders-extra.txt"   # xBRZ
 fi
 
+# SDL2: beside ki2.exe; in lib/ on Linux (the program's rpath is $ORIGIN/lib)
+cp "$sdl_licence" "$out/licenses/SDL2-LICENSE.txt"
+if [ $target = linux ]; then
+    mkdir -p "$out/lib"
+    cp -L "$3" "$out/lib/libSDL2-2.0.so.0"
+    strip --strip-unneeded "$out/lib/libSDL2-2.0.so.0"
+fi
 if [ $target = windows ]; then
     cp "$3" "$out/"
-    sdl=$(dirname "$3")/../../README-SDL.txt
-    [ -f "$sdl" ] && cp "$sdl" "$out/licenses/SDL2-README.txt"
-    echo "SDL2 is distributed under the zlib licence: https://libsdl.org/license.php" > "$out/licenses/SDL2-LICENSE.txt"
     # Windows text files want CRLF
     for f in "$out"/READ-ME-FIRST.txt "$out"/run/PUT-GAME-FILES-HERE.txt; do
         sed -i 's/$/\r/' "$f"

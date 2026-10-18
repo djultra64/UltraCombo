@@ -7,3 +7,4 @@
 void icon_pixels(uint32_t *argb, int size);           // size x size, 0xAARRGGBB
 void set_window_icon(SDL_Window *win);
 bool icon_write_ico(const char *path);               // 16, 32, 48 and 64 pixel images
+bool icon_write_png(const char *path, int size);     // for Linux desktop files

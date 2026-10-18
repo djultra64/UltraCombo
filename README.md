@@ -57,14 +57,26 @@ Windows builds emulate identically (same state after the same inputs).
 
 ### Release packages
 
-    make packages   # -> dist/KI2-Port-Linux.tar.xz, dist/KI2-Port-Windows.zip
+    make packages   # -> dist/KI2-Port-Linux.tar.xz, dist/KI2-Port-x86_64.AppImage,
+                    #    dist/KI2-Port-Windows.zip
 
 These hold the program, Zig and TinyCC, shaders and licences — no game files
 and no game code. They expect, in `deps/`: Zig 0.17 for Linux and Windows
 (`zig-linux/`, `zig-windows/`), TinyCC's `libtcc.so` built with that Zig
 against glibc 2.31 (`tcc-lnx231/`) and `libtcc.dll` (`tcc-win/`). The Linux
 program is built with Zig against glibc 2.31 too, so it runs on distributions
-from about 2020 on; it uses the system's SDL2.
+from about 2020 on, and so is SDL2 2.32.10 (from its source release, into
+`deps/sdl2-lnx/build`; configure with `-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu`
+and `-idirafter /usr/include` so it finds the X11/Wayland/audio headers),
+which ships in `lib/`.
+
+    make package-appimage   # -> dist/KI2-Port-x86_64.AppImage
+
+The AppImage is the Linux package plus AppImage's static runtime
+(`deps/dl/appimage-runtime/runtime-x86_64`, from
+github.com/AppImage/type2-runtime), packed with `mksquashfs`. Players make a
+`run/` folder beside the `.AppImage` for the game files; settings and the
+cache then go there too. Without one, the user data folder is used.
 
 "Killer Instinct" is a trademark of its owners; this project is not
 affiliated with them. Keep that in mind when naming anything you publish.

@@ -85,26 +85,33 @@ build-win/rec_headers.o: build/rec_headers.c
 	$(WIN_CC) $(WIN_CFLAGS) -c -o $@ $<
 
 # Linux build for distribution: Zig's clang against glibc 2.31, so it runs on
-# older distributions too. Uses the system's SDL2 at run time.
+# older distributions too. SDL2 (2.32.10, same version as the headers used)
+# is built the same way into deps/sdl2-lnx and shipped in lib/ beside it.
 LNX_ZIG  ?= deps/zig-linux/zig
-LNX_SDL  ?= $(firstword $(wildcard /usr/lib/x86_64-linux-gnu/libSDL2-2.0.so.0 /usr/lib64/libSDL2-2.0.so.0 /usr/lib/libSDL2-2.0.so.0))
+LNX_SDL  ?= deps/sdl2-lnx/build/libSDL2-2.0.so.0
 LNX_SRC   = $(SRC) src/rec_none.c build/rec_headers.c
 
 build-lnx/ki2: $(LNX_SRC) src/*.h
 	mkdir -p build-lnx/inc/SDL2
 	for d in $(shell pkg-config --cflags-only-I sdl2 | sed "s/-I//g") $(wildcard /usr/include/*-linux-gnu/SDL2); do ln -sf $$d/*.h build-lnx/inc/SDL2/; done
-	$(LNX_ZIG) cc -target x86_64-linux-gnu.2.31 -O2 -w -Ibuild-lnx/inc -Ibuild-lnx/inc/SDL2 -o $@ $(LNX_SRC) $(LNX_SDL) -lm -ldl
+	$(LNX_ZIG) cc -target x86_64-linux-gnu.2.31 -O2 -w -Ibuild-lnx/inc -Ibuild-lnx/inc/SDL2 -o $@ $(LNX_SRC) \
+	    $(LNX_SDL) -Wl,-rpath,'$$ORIGIN/lib' -lm -ldl
 
 # Packages without game files or game code (tools/package.sh)
 package-linux: build-lnx/ki2
-	sh tools/package.sh linux build-lnx/ki2
+	sh tools/package.sh linux build-lnx/ki2 $(LNX_SDL)
 	tar -C dist -cJf dist/KI2-Port-Linux.tar.xz KI2-Port-Linux
+
+# AppImage's runtime: github.com/AppImage/type2-runtime (static, needs no libfuse2)
+APPIMAGE_RUNTIME ?= deps/dl/appimage-runtime/runtime-x86_64
+package-appimage: package-linux
+	sh tools/package.sh appimage $(APPIMAGE_RUNTIME)
 
 package-windows: dist/windows/ki2.exe
 	sh tools/package.sh windows dist/windows/ki2.exe $(WIN_SDL)/bin/SDL2.dll
 	cd dist && rm -f KI2-Port-Windows.zip && zip -qr9 KI2-Port-Windows.zip KI2-Port-Windows
 
-packages: package-linux package-windows
+packages: package-appimage package-windows
 
 clean:
 	rm -rf build build-win build-lnx dist ki2 ki2-dist
@@ -123,4 +130,4 @@ shaders-extra:
 	    cd $(SHADER_REPO) && git sparse-checkout set crt xbrz blurs)
 	python3 tools/install_shaders.py $(SHADER_REPO) shaders/extra $(EXTRA_SHADERS)
 
-.PHONY: clean recomp windows shaders-extra package-linux package-windows packages
+.PHONY: clean recomp windows shaders-extra package-linux package-appimage package-windows packages

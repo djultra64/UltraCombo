@@ -8,6 +8,10 @@ no game code) is included here.
 1. Put your game files in the "run" folder (see run/PUT-GAME-FILES-HERE.txt).
 2. Start the program (ki2.exe on Windows, ./ki2 on Linux).
 
+AppImage (Linux): make a folder named "run" beside KI2-Port-x86_64.AppImage
+and put the game files in it; settings and the cache then go beside the
+AppImage too. Without that folder, use ~/.local/share/KI2Port/ki2/run/.
+
 First launch: "PREPARING THE GAME FOR THIS PC"
 ----------------------------------------------
 The first time, the program boots your game files, translates the game's
@@ -27,9 +31,8 @@ program if that folder is writable, otherwise into your user data folder:
   Windows: %APPDATA%\KI2Port\ki2\
   Linux:   ~/.local/share/KI2Port/ki2/
 
-Linux: needs SDL2 installed (Debian/Ubuntu: sudo apt install libsdl2-2.0-0;
-Fedora: sudo dnf install SDL2; Arch: sudo pacman -S sdl2) and glibc 2.29 or
-newer.
+Linux: needs glibc 2.29 or newer (distributions from about 2020 on). SDL2
+is included, in lib/.
 
 Press F1 in the game for the menu. README.md has the full manual.
 

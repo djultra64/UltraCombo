@@ -32,19 +32,20 @@ static void chunk(FILE *f, const char *type, const uint8_t *data, uint32_t n)
     fwrite(h, 1, 4, f);
 }
 
-bool png_write(const char *path, const uint32_t *xrgb, int w, int h)
+static bool write(const char *path, const uint32_t *px, int w, int h, bool alpha)
 {
+    const size_t bpp = alpha ? 4 : 3;
     FILE *f = fopen(path, "wb");
     if (!f) return false;
     static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n' };
     fwrite(sig, 1, 8, f);
     uint8_t ihdr[13];
     be32(ihdr, (uint32_t)w); be32(ihdr + 4, (uint32_t)h);
-    ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = ihdr[11] = ihdr[12] = 0;
+    ihdr[8] = 8; ihdr[9] = alpha ? 6 : 2; ihdr[10] = ihdr[11] = ihdr[12] = 0;
     chunk(f, "IHDR", ihdr, 13);
 
-    // raw scanlines (filter byte 0 + RGB), wrapped in stored deflate blocks
-    size_t raw_n = (size_t)h * (1 + 3 * (size_t)w);
+    // raw scanlines (filter byte 0 + RGB or RGBA), wrapped in stored deflate blocks
+    size_t raw_n = (size_t)h * (1 + bpp * (size_t)w);
     size_t blocks = (raw_n + 65534) / 65535;
     size_t z_n = 2 + raw_n + blocks * 5 + 4;
     static uint8_t buf[2 + 640 * 480 * 4 + 64 * 5 + 4];
@@ -54,8 +55,9 @@ bool png_write(const char *path, const uint32_t *xrgb, int w, int h)
     for (int y = 0; y < h; y++) {
         *r++ = 0;
         for (int x = 0; x < w; x++) {
-            uint32_t p = xrgb[y * w + x];
+            uint32_t p = px[y * w + x];
             *r++ = p >> 16; *r++ = p >> 8; *r++ = p;
+            if (alpha) *r++ = p >> 24;
         }
     }
     uint32_t a = 1, b = 0;
@@ -76,3 +78,6 @@ bool png_write(const char *path, const uint32_t *xrgb, int w, int h)
     fclose(f);
     return ok;
 }
+
+bool png_write(const char *path, const uint32_t *xrgb, int w, int h) { return write(path, xrgb, w, h, false); }
+bool png_write_argb(const char *path, const uint32_t *argb, int w, int h) { return write(path, argb, w, h, true); }
