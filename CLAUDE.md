@@ -1,0 +1,146 @@
+# UltraCombo 2
+
+Native port for the Killer Instinct 2 arcade game (C11 + SDL2 + OpenGL), for
+Linux and Windows. It runs the game's own MIPS code, statically translated to
+C, with the hardware around it emulated. Players supply their own game files.
+README.md is the user manual; this file is for working on the code.
+
+## Hard rules: game data and game code
+
+The game's ROMs, disk image and code are copyrighted. This repo is public.
+
+- Never commit or ship anything made from the game files:
+  - ROM or disk data, RAM snapshots (`build/snap/`), translated code
+    (`build/rec/`, any `rec_*.c` / `rec_tab.c`, `cache/`);
+  - audio recordings (`KI2_WAV`), screenshots or frame dumps, save states;
+  - any binary built after `make recomp`, which links the game code in.
+- Distributable programs contain no game code. They build it on the player's
+  machine at first launch (`rec_build.c`). Release packages come only from
+  `make packages`.
+- Never `git add -A` / `git add .`: the working folder holds builds with game
+  code and test output. Add files by name and read `git status` first.
+- Commit as `thefixinhixon <132857351+thefixinhixon@users.noreply.github.com>`
+  (set in the repo's git config). Never commit a personal email.
+- Name the product UltraCombo 2. Use "Killer Instinct 2" only to say what it
+  plays, never as the product's name. It is a trademark.
+
+## Layout
+
+| Area | Files |
+|---|---|
+| CPU: MIPS R4600 interpreter, TLB, exceptions | `cpu.c/h`, `disasm.c` |
+| Memory map and I/O | `mem.c/h`, `machine.h` |
+| IDE disk (settings sectors journaled in memory) | `ide.c/h` |
+| Sound: DCS board, ADSP-2105 core | `dcs.c`, `adsp.c/h`, `sound.h` |
+| Translated code: dispatcher, maps | `rec.c/h` |
+| The translator (MIPS to C), used at run time | `recomp.c/h` (`tools/recomp.py` is the original) |
+| Contract between program and translated code | `rec_abi.h`, `rec_gen.h` |
+| First-run build and cache | `rec_build.c/h`; `rec_none.c` = no linked-in code |
+| Save states, rewind, run-ahead | `state.c/h` |
+| Rollback netplay | `net.c/h`, `netplay.c/h` |
+| Window, menu, pacing, input | `frontend.c`, `osd.c/h`, `config.c/h`, `training.c/h` |
+| Video, OpenGL, libretro shader presets | `video.c/h`, `shaders.c/h`, `gl_funcs.h` |
+| Game-setting tweaks, e.g. CPU difficulty | `adjust.c/h` |
+| Icon (drawn in code) and PNG writer | `icon.c/h`, `png.c/h`, `ki2.rc` |
+| Program entry, CLI, `data_dir()`/`base_dir()`/`find_data()` | `main.c` |
+
+## Determinism (netplay, rewind and run-ahead depend on it)
+
+- Emulation must be bit-identical across compilers (gcc, clang/Zig, MinGW,
+  TinyCC modules) and across linked-in vs run-time-built code. Save states
+  and netplay compare raw bytes.
+- `memset` any local struct before copying it into a state blob. Padding
+  bytes once made gcc and Zig builds hash differently.
+- Frontend code that writes to emulated RAM must call `ram_touch()`, or
+  the dirty-page journal misses the write.
+- After any change to emulation, run the regression test (below); the hash
+  must not change. If a change is meant to alter emulation, say so and record
+  the new hash. `state_compat_id()` must differ between builds that emulate
+  differently.
+
+## Translated-code modules
+
+- `rec_abi.h` and `rec_gen.h` are compiled into the module **without the C
+  library** (`REC_MODULE`, `-nostdlib`). Keep them free of libc headers and
+  calls, and make everything work under TinyCC too: give GCC builtins a
+  fallback, as the existing overflow and 64-bit multiply helpers do.
+- Both headers are embedded into the program (`tools/embed.py` →
+  `build/rec_headers.c`), so rebuilding the program picks up changes.
+- Bump `REC_ABI_VERSION` (`rec_abi.h`) when the program/module contract changes,
+  and `RECOMP_VERSION` (`rec_build.c`) when the generated C changes. Both are
+  in the cache key; forgetting them leaves players running stale modules.
+- Compiler order at first launch: bundled Zig → system cc/gcc/clang → TinyCC
+  (about half the speed) → interpreter. All four must give the regression
+  hash.
+
+## Product rules
+
+- Enhancements are options on top of authentic defaults. Keep the boot and
+  attract intros: they are part of the game.
+- Graphics stay on OpenGL; no Vulkan.
+- No "resume where you left off" on launch.
+- Settings live in the table in `config.c` (`MAX_OPTS`), and `ki2.ini` is
+  written from it with comments.
+- Writable files go in `data_dir()`: beside the program if that's writable,
+  beside an AppImage that has `run/` next to it, else the user data folder
+  `UltraCombo2`. Bundled read-only files come from `base_dir()`.
+- Bundled shaders in `shaders/` must be permissively licensed. GPL presets are
+  only fetched by `make shaders-extra`.
+
+## Workflows
+
+Build and run (needs gcc, SDL2, python3; game files in `run/`):
+
+    make                 # ultracombo2: builds the game code at first launch
+    make recomp          # developer build with the game code linked in (never share it)
+    ./ultracombo2
+
+Regression test: a fixed 4400-frame boot, coin-up and two-player fight,
+printing a state hash:
+
+    tools/regress.sh PROGRAM DISK_HEAD [RUN_DIR] [WORK_DIR]
+
+It works on a copy of the disk and never writes to `run/kinst2.raw`. Compare
+the hash against the reference for the same disk head. Useful environment
+variables:
+- `KI2_NOREC=1`: interpreter only, which gives a different but also fixed hash.
+- `KI2_LOAD_MODULE=path.so`: use a given module.
+- `KI2_BUILD=1 KI2_BUILD_WITH=zig|cc|tcc`: build the module now, headless,
+  with that compiler.
+
+Packages (no game files, no game code):
+
+    make packages        # dist/UltraCombo2-Windows.zip, -Linux.tar.xz, -x86_64.AppImage
+
+These need, in `deps/`:
+- Zig 0.17 for Linux and Windows;
+- `libtcc.so` built with Zig against glibc 2.31 (`tcc-lnx231/`), and `libtcc.dll` (`tcc-win/`);
+- SDL2 2.32.10 built with Zig (`sdl2-lnx/`), and the SDL2 MinGW package (`sdl2-mingw/`);
+- the AppImage type2 runtime (`dl/appimage-runtime/`).
+
+See README.md, "Release packages". The Linux program targets glibc 2.31. Check
+any new library call with `objdump -T` (the most it may need is GLIBC_2.29).
+
+Windows: `make windows` cross-compiles with MinGW. Zig won't run under Wine,
+so test the Windows module path with `KI2_BUILD_WITH=tcc` there; the Zig path
+needs real Windows.
+
+Windowed testing without a display: run it under `Xvfb :99` with
+`SDL_AUDIODRIVER=dummy`, and send keys with `xdotool keydown` / `keyup` held a
+few frames, because input is sampled once per frame and quick `key` taps get
+missed. Run a copy of the program from a scratch folder so it gets its own
+`ki2.ini`.
+
+Headless switches: see `usage()` in `main.c` (`--headless`, `--script`,
+`--save-at`, `--load`, `--rewind-test`, `--runahead`, `--net-host`/`--net-join`/`--net-sim`).
+Debug environment variables, all read with `getenv` in `src/` (grep them
+for details): `KI2_LOG_EXC`, `KI2_LOG_IDE` and `KI2_LOG_SOUND` (logging),
+`KI2_DUMP_AT` (RAM snapshot at a frame), `KI2_WAV` (record audio, output is
+game-derived), `KI2_CONSOLE` (Windows: log to the console instead of
+`ki2.log`).
+
+## Style
+
+Match the surrounding code: C11, 4-space indent, short functions with short
+comments that say why, British spelling in prose ("licence", "colour"). The
+`-Wextra` warnings already in the build are known. Don't add new ones.
