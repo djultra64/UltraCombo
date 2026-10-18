@@ -164,7 +164,14 @@ Debug environment variables, all read with `getenv` in `src/` (grep them
 for details): `KI2_LOG_EXC`, `KI2_LOG_IDE` and `KI2_LOG_SOUND` (logging),
 `KI2_DUMP_AT` (RAM snapshot at a frame), `KI2_WAV` (record audio, output is
 game-derived), `KI2_CONSOLE` (Windows: log to the console instead of
-`ki2.log`).
+`ki2.log`). `KI2_DUMP_AT` also takes a list (`F1,F2,...` → `ram2_<F>.bin`),
+`KI2_TRAINING=1` applies training mode headless, `KI2_SWITCH_TEST=N:V`
+switches to game version V after N frames (must equal a fresh start).
+
+Finding a game's RAM locations: run two deterministic headless scripts
+that differ in one thing (hits or no hits), dump RAM at several frames,
+and compare with numpy. Disk settings: change the value in the game's own
+operator menu (`test` button in scripts) and diff the settings files.
 
 ## Style
 
