@@ -11,3 +11,6 @@ kinst2.raw is extracted from MAME's kinst2.chd with MAME's chdman tool:
 
 The ROM files are the ones in MAME's kinst2 set (unzip it here).
 The game saves its settings and high scores into kinst2.raw.
+
+To check you have the right files, compare their MD5 or SHA1 checksums with
+the table in README.md, section "Checking your files".

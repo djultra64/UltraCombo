@@ -15,6 +15,55 @@ Put these in `run/` (or point `ki2.ini` at them):
   `chdman extractraw -i kinst2.chd -o kinst2.raw`
 - `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36` — sound ROMs
 
+### Checking your files
+
+These are the files of MAME's `kinst2` and `kinst` sets (the dumps MAME
+lists as good). Check yours with `md5sum` (Linux), `certutil -hashfile FILE
+MD5` (Windows) or any ROM manager. Every ROM is 524,288 bytes.
+
+**UltraCombo 2 (Killer Instinct 2):**
+
+| File | What | MD5 | SHA1 |
+|---|---|---|---|
+| `ki2-l14.u98` | boot ROM, L1.4 | `8681c9d373394b17f3499e8902055dab` | `aa7a2a9d72a47dd0ea2ee7b2776b79288060b179` |
+| `ki2_l1.u10` | sound | `fa0c7f9dc7ee0995913a4769996a7d80` | `acfc9460cd5df01403b7f00b2f68c2a8734ad6d3` |
+| `ki2_l1.u11` | sound | `dc87ed16f9d95cb0aa0ea0117ef4be09` | `fe7fc78f1c60b15f2bbdc4c455f55cdf30f48ed4` |
+| `ki2_l1.u12` | sound | `0b034258a8561ac4bfa339a781777c4a` | `9997a83432cb720f65b40a8af46f31a5d0d16d8e` |
+| `ki2_l1.u13` | sound | `6d42f7de396c7f9eb760e51af4fcdca2` | `7ff164fc2f079d039921594be92208973d43aa03` |
+| `ki2_l1.u33` | sound | `aae93e81ac881c56d0aecab2f59c8797` | `0ab6dbfb76e9fa2db072e287864ad1f9d514dd9b` |
+| `ki2_l1.u34` | sound | `116cbfd189879a3a601f1f7ccb64285c` | `48456a7b6592c40bc9c664dcd2ee2cfd91942811` |
+| `ki2_l1.u35` | sound | `ec3103d67a528412da9cb91a2729df65` | `24a3ff009c8a7f5a0bfcb198b8dcb5df365770d3` |
+| `ki2_l1.u36` | sound | `a03144702e28a9e89e50c5a377cb47b3` | `0fca72c40067034939b984b4bf32972a5a6c26af` |
+| `kinst2.raw` | disk, freshly extracted | `2563b089b316f2c8636d78af661ac656` | `ab0242233d2eaf9d907abe246a54e09a8a2561a5` |
+
+**UltraCombo (Killer Instinct), in development:**
+
+| File | What | MD5 | SHA1 |
+|---|---|---|---|
+| `ki-l15d.u98` | boot ROM, L1.5D (default) | `6a63e4bbdef8ea9f0d26f7244341ca08` | `607394d4ba1713f38c2cb5159303cace9cde991e` |
+| `ki-l14.u98` | boot ROM, L1.4 (optional) | `aff07bdb5bf4763bf81e243077cf9761` | `07254f20707377f7195e64675eb6458e663c1a9a` |
+| `u10-l1` | sound | `9ee2b2cdda7ede8811a57507ef61e07b` | `810d455df8f385d76143e9d7d048f2b555ff8bf0` |
+| `u11-l1` | sound | `bce2d8cd20e94d4406c19fd55d798946` | `0595909cb667c38ac7c8c7bd0646b28899e27777` |
+| `u12-l1` | sound | `14bb46cef4884f8df5df1fa985e6d3bf` | `7a8ee405c118fd176b66353fa7bfab888cc63cd2` |
+| `u13-l1` | sound | `ca0904ee517845eed5509426cf5d8560` | `ea4d1f153eb284f1bcfc5295fbce316bba6083f4` |
+| `u33-l1` | sound | `da9e7f5f70320b51e6fdc23e9337484c` | `b22e365bc8d58a80eaac226be14b4bb8d9a04844` |
+| `u34-l1` | sound | `207395792342705bea307ecb321a95bf` | `ee439f5162a2b3379d3f802328017bb3c68547d2` |
+| `u35-l1` | sound | `a1758b43b42b32c25c770dc3ac7badc3` | `48c4c954ac9db648f28ad64f9845e19ec432eec3` |
+| `u36-l1` | sound | `57b73bec5d0e8c90d8898e102ce4066b` | `cc78070cc41701e9a91fde5cfbdc7e1e83354854` |
+| `kinst.raw` | disk, freshly extracted | `6d4c2f152c9a18ab3a9b05b8804306a8` | `a37a2c5e52ea936a715210d237874dd573bb002f` |
+
+The disk checksums are for the image right after extraction: the game writes
+its settings and high scores into the first sectors, so after the first
+launch the `.raw` file no longer matches. To check a disk, check the CHD
+instead. A CHD file's own MD5 depends on the chdman version that made it, so
+compare the SHA1 that `chdman info -i FILE` prints as "SHA1" (the one MAME
+uses):
+
+| CHD | SHA1 (from `chdman info`) | MD5 of MAME's current file |
+|---|---|---|
+| `kinst2.chd` | `e7c9291b4648eae0012ea0cc230731ed4987d1d5` | `5970ca942c0c7c5f62f651bf93e15dc5` |
+| `kinst.chd` | `81d833236e994528d1482979261401b198d1ca53` | `a542547abdff0a28df440c3a4d1cfdde` |
+
 Then start `ultracombo2` (`UltraCombo2.exe` on Windows). On the first launch
 the program shows "PREPARING THE GAME FOR THIS PC": it boots your game files
 on its interpreter until the game has loaded its code, snapshots that code,
