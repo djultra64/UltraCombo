@@ -29,7 +29,7 @@
 extern char **environ;
 #endif
 
-#define RECOMP_VERSION 1           // bump when recomp.c's output changes
+#define RECOMP_VERSION 2           // bump when recomp.c's output changes
 #define SNAPSHOT_FRAMES game.snapshot_frames   // the game has loaded all of its code by then
 
 // rec_abi.h and rec_gen.h, embedded at build time (build/rec_headers.c)
@@ -137,9 +137,18 @@ static void tcc_marker(const char *src, char *out, size_t n) { snprintf(out, n, 
 
 #define MAX_JOBS 16
 
-typedef struct { char *argv[24]; int argc; } cmd_t;
+// Room for a link of every file the translator can write (MAX_FILES in
+// recomp.c) plus the compiler's own arguments. A command that doesn't fit
+// fails instead of quietly losing arguments.
+#define CMD_ARGS 96
+typedef struct { char *argv[CMD_ARGS]; int argc; bool overflow; } cmd_t;
 
-static void cmd_add(cmd_t *c, const char *a) { if (c->argc < 23) c->argv[c->argc++] = strdup(a); c->argv[c->argc] = NULL; }
+static void cmd_add(cmd_t *c, const char *a)
+{
+    if (c->argc < CMD_ARGS - 1) c->argv[c->argc++] = strdup(a);
+    else c->overflow = true;
+    c->argv[c->argc] = NULL;
+}
 static void cmd_free(cmd_t *c) { for (int i = 0; i < c->argc; i++) free(c->argv[i]); c->argc = 0; }
 
 // Run the commands, `parallel` at a time, output appended to `log`. True if all succeeded.
@@ -147,6 +156,7 @@ static bool run_all(cmd_t *cmds, int n, int parallel, const char *log, void (*ti
 {
     if (parallel < 1) parallel = 1;
     if (parallel > MAX_JOBS) parallel = MAX_JOBS;
+    for (int i = 0; i < n; i++) if (cmds[i].overflow) return false;
     bool ok = true;
     int next = 0, done = 0;
 #ifdef _WIN32
@@ -156,12 +166,17 @@ static bool run_all(cmd_t *cmds, int n, int parallel, const char *log, void (*ti
     HANDLE out = CreateFileA(log, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     while (done < n) {
         while (nrun < parallel && next < n && ok) {
-            char line[8192] = "";
+            static char line[32768];                    // Windows' limit for a command line
+            size_t len = 0;
             for (int i = 0; i < cmds[next].argc; i++) {
-                strncat(line, "\"", sizeof line - strlen(line) - 1);
-                strncat(line, cmds[next].argv[i], sizeof line - strlen(line) - 1);
-                strncat(line, "\" ", sizeof line - strlen(line) - 1);
+                size_t al = strlen(cmds[next].argv[i]);
+                if (len + al + 4 > sizeof line) { ok = false; break; }   // too long: fail, don't truncate
+                line[len++] = '"';
+                memcpy(line + len, cmds[next].argv[i], al); len += al;
+                line[len++] = '"'; line[len++] = ' ';
             }
+            line[len] = 0;
+            if (!ok) { next = n; break; }
             STARTUPINFOA si = { sizeof si };
             PROCESS_INFORMATION pi;
             si.dwFlags = STARTF_USESTDHANDLES;
@@ -492,8 +507,12 @@ bool rec_build(rec_progress_fn progress, char *msg, size_t msglen)
     snprintf(log, sizeof log, "%s/build.log", src);
     remove(log);
 
-    // 1. boot the game on the interpreter until it has loaded its code
+    // 1. boot the game on the interpreter until it has loaded its code. This
+    // hidden boot must leave no trace: games write their settings sectors
+    // while booting (KI1 counts power-ons), so those are put back after it.
     uint32_t dsw = hw.dsw;
+    uint8_t *disk_head = malloc(IDE_TRACK_BYTES);
+    memcpy(disk_head, ide_tracked(), IDE_TRACK_BYTES);
     machine_reset();
     for (int f = 0; f < SNAPSHOT_FRAMES; f++) {
         hw.p1 = hw.p2 = 0xffffffffu;
@@ -502,6 +521,11 @@ bool rec_build(rec_progress_fn progress, char *msg, size_t msglen)
     }
     uint8_t *snap = malloc(RAM_SIZE);
     memcpy(snap, ram, RAM_SIZE);
+    if (memcmp(disk_head, ide_tracked(), IDE_TRACK_BYTES)) {
+        memcpy(ide_tracked(), disk_head, IDE_TRACK_BYTES);
+        ide_tracked_changed();
+    }
+    free(disk_head);
     hw.dsw = dsw;
     machine_reset();
 

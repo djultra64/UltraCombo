@@ -109,11 +109,15 @@ Build and run (needs gcc, SDL2, python3; game files in `run/`):
 Regression test: a fixed 4400-frame boot, coin-up and two-player fight,
 printing a state hash:
 
-    tools/regress.sh PROGRAM DISK_HEAD [RUN_DIR] [WORK_DIR]
+    tools/regress.sh [-g ki1|ki2] PROGRAM DISK_HEAD [RUN_DIR] [WORK_DIR]
 
-It works on a copy of the disk and never writes to `run/kinst2.raw`. Compare
-the hash against the reference for the same disk head. Useful environment
-variables:
+It works on a copy of the disk and never writes to the one in `run/`, and it
+fixes the DIP switches, so the user's settings don't matter. Compare the hash
+against the reference for the same game and disk head. Translated and
+interpreted runs give different hashes, both valid, because translated code
+takes interrupts at block boundaries. What must match is every build of the
+same translated code (any compiler, linked-in or built at first launch).
+Useful environment variables:
 - `KI2_NOREC=1`: interpreter only, which gives a different but also fixed hash.
 - `KI2_LOAD_MODULE=path.so`: use a given module.
 - `KI2_BUILD=1 KI2_BUILD_WITH=zig|cc|tcc`: build the module now, headless,

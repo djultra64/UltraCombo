@@ -199,7 +199,9 @@ static const button_t buttons[] = {
     { "p1up", &hw.p1, 0x0040 }, { "p1down", &hw.p1, 0x0080 }, { "p1left", &hw.p1, 0x0100 },
     { "p1right", &hw.p1, 0x0200 }, { "start1", &hw.p1, 0x0400 }, { "coin1", &hw.p1, 0x0800 },
     { "test", &hw.p1, 0x1000 },
-    { "p2hq", &hw.p2, 0x0001 }, { "p2lq", &hw.p2, 0x0008 }, { "p2left", &hw.p2, 0x0100 },
+    { "p2hq", &hw.p2, 0x0001 }, { "p2hm", &hw.p2, 0x0002 }, { "p2hf", &hw.p2, 0x0004 },
+    { "p2lq", &hw.p2, 0x0008 }, { "p2lm", &hw.p2, 0x0010 }, { "p2lf", &hw.p2, 0x0020 },
+    { "p2up", &hw.p2, 0x0040 }, { "p2down", &hw.p2, 0x0080 }, { "p2left", &hw.p2, 0x0100 },
     { "p2right", &hw.p2, 0x0200 }, { "start2", &hw.p2, 0x0400 }, { "coin2", &hw.p2, 0x0800 },
 };
 typedef struct { int frame, len; const button_t *b; } script_ev_t;

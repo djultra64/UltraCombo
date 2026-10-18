@@ -416,6 +416,22 @@ bool recomp_generate(const uint8_t *snap0, const uint8_t *snap2, const char *out
     descend(&work, BASE, BASE + RAM2_BYTES);
     uint32_t end = BASE;
     for (uint32_t i = 0; i < SLOTS; i++) if (code[i]) end = BASE + 4 * i + 4;
+    // Addresses the code builds in a register (lui + addiu/ori) are entry
+    // points too: code reached only through a pointer stored at run time
+    // (KI1 picks its span renderers per frame) is otherwise never found. A
+    // false match only adds a label.
+    for (uint32_t pc = BASE; pc < end; pc += 4) {
+        uint32_t op = word(pc);
+        if (op >> 26 != 0x0f) continue;                              // lui
+        unsigned rt = (op >> 16) & 31;
+        for (uint32_t q = pc + 4; q < pc + 32 && q < end; q += 4) {
+            uint32_t o2 = word(q), k = o2 >> 26;
+            if ((k != 0x09 && k != 0x0d) || ((o2 >> 21) & 31) != rt) continue;   // addiu / ori from it
+            uint32_t a = k == 0x09 ? (op << 16) + (uint32_t)(int32_t)(int16_t)o2 : (op << 16) | (o2 & 0xffff);
+            if (a >= BASE && a < end && !(a & 3)) { mark(leader, a); push(&work, a); }
+            break;
+        }
+    }
     // Pointers into the code found anywhere in RAM (return addresses, function
     // pointers, jump tables) become entry points. They may not extend the
     // region: past its end lies data, and stores there would invalidate it.
