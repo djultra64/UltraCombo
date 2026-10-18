@@ -11,7 +11,8 @@
 # depends on them. They are written to a settings file in WORK_DIR (default
 # $TMPDIR/uc-regress) before each run; the disk image is only read. RUN_DIR
 # holds your game files (default: run/). DISK=path uses another disk image
-# (a raw file or the CHD). The DIP switches are the defaults unless KI2_DSW
+# (a raw file or the CHD), ROM=name another boot ROM in RUN_DIR (another
+# game version, e.g. ROM=ki-l14.u98). The DIP switches are the defaults unless KI2_DSW
 # is set. Extra environment (KI2_LOAD_MODULE, KI2_BUILD, KI2_NOREC,
 # KI2_DUMP_AT, KI2_WAV, ...) passes through.
 set -e
@@ -26,6 +27,7 @@ prog=$(realpath "$1") head=$(realpath "$2")
 run=$(realpath "${3:-run}") work=${4:-${TMPDIR:-/tmp}/uc-regress}
 inputs=$(realpath "$(dirname "$0")/regress-$game.txt")
 image=$(realpath "${DISK:-$run/$disk}")
+rom=${ROM:-$rom}
 export KI2_DSW=${KI2_DSW:-fffff1ff}     # blood high, demo sounds, finishing moves, free play
 mkdir -p "$work"
 cp "$head" "$work/$game.settings"

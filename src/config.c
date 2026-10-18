@@ -18,6 +18,7 @@ typedef struct {
     const char *def;
     const char *help;
     const char *const *names;   // T_ENUM
+    size_t size;                // T_STR: size of the buffer
 } opt_t;
 
 static const char *const scale_names[] = { "fit", "integer", "stretch", 0 };
@@ -53,7 +54,16 @@ static char key_names[2][NBUTTONS][24], pad_keys[NBUTTONS][24], hk_keys[NHOTKEYS
 static void add(const char *sec, const char *key, type_t t, void *p, const char *def, const char *help, const char *const *names)
 {
     if (nopts == MAX_OPTS) { fprintf(stderr, "config: too many settings, %s ignored\n", key); return; }
-    opts[nopts++] = (opt_t){ sec, key, t, p, def, help, names };
+    opts[nopts++] = (opt_t){ sec, key, t, p, def, help, names, 0 };
+}
+
+// A text setting: its buffer's size comes along, so a long value is cut short
+// instead of running past the buffer.
+#define add_str(sec, key, buf, def, help) add_sized(sec, key, buf, sizeof(buf), def, help)
+static void add_sized(const char *sec, const char *key, char *buf, size_t size, const char *def, const char *help)
+{
+    add(sec, key, T_STR, buf, def, help, 0);
+    if (nopts && opts[nopts - 1].ptr == buf) opts[nopts - 1].size = size;
 }
 
 static void build_table(void)
@@ -63,13 +73,13 @@ static void build_table(void)
     snprintf(rom_help, sizeof rom_help, "boot ROM; empty = %s here or in run/", game.versions[0].rom);
     snprintf(disk_help, sizeof disk_help, "raw disk image; empty = %s", game.disk);
     snprintf(sound_help, sizeof sound_help, "directory with %s..%s; empty = beside the ROM", game.sound_roms[0], game.sound_roms[7]);
-    add("paths", "rom", T_STR, cfg.rom, "", rom_help, 0);
-    add("paths", "disk", T_STR, cfg.disk, "", disk_help, 0);
-    add("paths", "sound", T_STR, cfg.sound, "", sound_help, 0);
+    add_str("paths", "rom", cfg.rom, "", rom_help);
+    add_str("paths", "disk", cfg.disk, "", disk_help);
+    add_str("paths", "sound", cfg.sound, "", sound_help);
 
     add("video", "fullscreen", T_BOOL, &cfg.fullscreen, "no", "start in fullscreen (toggle with the fullscreen hotkey or Alt+Enter)", 0);
     add("video", "fullscreen_exclusive", T_BOOL, &cfg.fullscreen_exclusive, "no", "exclusive fullscreen (sets the display mode) instead of borderless", 0);
-    add("video", "fullscreen_mode", T_STR, cfg.fullscreen_mode, "", "display mode for exclusive fullscreen, e.g. 1920x1080@60; empty = current", 0);
+    add_str("video", "fullscreen_mode", cfg.fullscreen_mode, "", "display mode for exclusive fullscreen, e.g. 1920x1080@60; empty = current");
     add("video", "window_scale", T_INT, &cfg.window_scale, "3", "initial window size as a multiple of 320x240", 0);
     add("video", "performance_overlay", T_BOOL, &cfg.perf_overlay, "no", "show frame rate, emulation speed and audio buffer", 0);
     add("video", "window_x", T_INT, &cfg.window_x, "0", "last window position and size (remembered on exit)", 0);
@@ -77,8 +87,8 @@ static void build_table(void)
     add("video", "window_w", T_INT, &cfg.window_w, "0", 0, 0);
     add("video", "window_h", T_INT, &cfg.window_h, "0", 0, 0);
     add("video", "scale", T_ENUM, &cfg.scale_mode, "fit", "fit (largest 4:3), integer (sharpest, may border), stretch", scale_names);
-    add("video", "shader", T_STR, cfg.shader, "", "a libretro .glslp preset under shaders/ (overrides filter), e.g. shaders/crt/crt-lottes.glslp", 0);
-    add("video", "shader_params", T_STR, cfg.shader_params, "", "adjusted shader parameters (set from the menu)", 0);
+    add_str("video", "shader", cfg.shader, "", "a libretro .glslp preset under shaders/ (overrides filter), e.g. shaders/crt/crt-lottes.glslp");
+    add_str("video", "shader_params", cfg.shader_params, "", "adjusted shader parameters (set from the menu)");
     add("video", "filter", T_ENUM, &cfg.filter, "sharp",
         "sharp (crisp pixels), smooth (sharpened bicubic), scanlines, crt (scanlines, mask, curvature)", filter_names);
     add("video", "pacing", T_ENUM, &cfg.pacing, "auto",
@@ -101,11 +111,18 @@ static void build_table(void)
     add("system", "input_display", T_BOOL, &cfg.input_display, "no", "show both players' recent inputs (numpad notation)", 0);
     add("system", "training", T_BOOL, &cfg.training, "no",
         "training mode: health refills after each combo, the clock stops (start a 2-player game for a dummy)", 0);
+    static char version_help[160] = "game version: ";
+    if (!version_help[14])
+        for (int v = 0; v < 4 && game.versions[v].label; v++) {
+            strncat(version_help, v ? ", " : "", sizeof version_help - strlen(version_help) - 1);
+            strncat(version_help, game.versions[v].label, sizeof version_help - strlen(version_help) - 1);
+        }
+    add_str("game", "version", cfg.version, game.versions[0].label, version_help);
     add("game", "free_play", T_BOOL, &cfg.free_play, "yes", "no coins needed: just press Start (the board's coinage DIP switch)", 0);
     add("game", "blood", T_ENUM, &cfg.blood, "high", "none, low, medium, high", blood_names);
     add("game", "finishing_moves", T_BOOL, &cfg.finishing_moves, "yes", "Ultra combos and No Mercy finishers", 0);
     add("game", "demo_sounds", T_BOOL, &cfg.demo_sounds, "yes", "sound during the attract mode", 0);
-    add("netplay", "address", T_STR, cfg.net_address, "", "host to join (name or IP, optionally :port)", 0);
+    add_str("netplay", "address", cfg.net_address, "", "host to join (name or IP, optionally :port)");
     add("netplay", "port", T_INT, &cfg.net_port, "7845", "UDP port to host on (forward it on your router, or use a VPN such as Tailscale)", 0);
     add("netplay", "input_delay", T_INT, &cfg.net_delay, "2",
         "frames before your input takes effect; more = fewer rollbacks. 1-2 for nearby players, 3-4 far away", 0);
@@ -152,7 +169,7 @@ static int parse_pad(const char *v)
 static bool set(opt_t *o, const char *v)
 {
     switch (o->type) {
-    case T_STR: snprintf((char *)o->ptr, 1024, "%s", v); return true;
+    case T_STR: snprintf((char *)o->ptr, o->size, "%s", v); return true;
     case T_INT: *(int *)o->ptr = atoi(v); return true;
     case T_BOOL:
         *(bool *)o->ptr = !SDL_strcasecmp(v, "yes") || !SDL_strcasecmp(v, "true") || !SDL_strcasecmp(v, "on") || !strcmp(v, "1");

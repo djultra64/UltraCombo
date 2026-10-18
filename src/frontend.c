@@ -453,13 +453,38 @@ static void apply_rewind_setting(void)
 enum { PG_MAIN, PG_GRAPHICS, PG_PARAMS, PG_CONTROLS, PG_BIND, PG_GAME, PG_PRACTICE, PG_NETPLAY };
 
 // Main page
+static void apply_rewind_setting(void);
+static void prepare_game_code(void);
+static int boot_difficulty;          // as read when the machine last powered on
+
+// Power-cycle the cabinet, as "Reset game" does.
+static void hard_reset(void)
+{
+    hw.dsw = config_dsw();
+    machine_reset();
+    boot_difficulty = adjust_difficulty();
+    apply_rewind_setting();
+    ac.active = false;
+    frame_count = 0;
+    stop_audio();
+}
+
+static int version_pick = -1;          // version chosen in the menu, not switched to yet
+
+static int versions_there(void)
+{
+    int n = 0;
+    for (int v = 0; v < 4 && game.versions[v].label; v++) n += machine_version_available(v);
+    return n;
+}
+
 enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_QUIT, M_COUNT };
 // Graphics
 enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 // Controls
 enum { C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_BACK, C_COUNT };
 // Game & system
-enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_DIFFICULTY, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
+enum { S_VOLUME, S_MUTE_BG, S_PAUSE_BG, S_VERSION, S_DIFFICULTY, S_FREEPLAY, S_BLOOD, S_FINISH, S_DEMO, S_AUTOCOIN, S_RUNAHEAD, S_REWIND, S_BACK, S_COUNT };
 // Practice
 enum { T_TRAINING, T_INPUTS, T_RECORD, T_PLAY, T_BACK, T_COUNT };
 // Netplay
@@ -473,7 +498,6 @@ static int bind_set;                 // PG_BIND: 0 P1 keys, 1 P2 keys, 2 pad but
 static int capturing = -1;           // row waiting for a key or button
 
 static bool in_netplay(void) { return netplay_running(); }
-static int boot_difficulty;          // as read when the machine last powered on
 static void not_in_netplay(void) { osd_message("Not available during netplay"); }
 
 static const char *const button_labels[NBUTTONS] = {
@@ -676,6 +700,15 @@ static void draw_menu(uint32_t *out)
         else snprintf(b[S_VOLUME], 72, "Volume\t< %d%% >", volume);
         snprintf(b[S_MUTE_BG], 72, "Mute in background\t%s", onoff[cfg.mute_unfocused]);
         snprintf(b[S_PAUSE_BG], 72, "Pause in background\t%s", onoff[cfg.pause_unfocused]);
+        {
+            int cur = machine_version();
+            if (cur < 0) snprintf(b[S_VERSION], 72, "Game version\t(ROM set in %s.ini)", game.id);
+            else if (version_pick >= 0 && version_pick != cur) {
+                snprintf(b[S_VERSION], 72, "Game version\t< %s >  Enter: switch", game.versions[version_pick].label);
+                foot = "SWITCHING RESETS THE GAME";
+            } else if (versions_there() > 1) snprintf(b[S_VERSION], 72, "Game version\t< %s >", game.versions[cur].label);
+            else snprintf(b[S_VERSION], 72, "Game version\t%s", game.versions[cur].label);
+        }
         static const char *const diff_names[] = { "?", "Extra easy", "Easy", "Medium", "Hard", "Extra hard" };
         int dl = adjust_difficulty();
         snprintf(b[S_DIFFICULTY], 72, "CPU difficulty\t< %s >%s", dl < 0 ? "(unknown)" : diff_names[dl],
@@ -776,13 +809,7 @@ static void menu_change(int dir)
         case M_RESET:
             if (dir) return;
             if (in_netplay()) { not_in_netplay(); return; }
-            hw.dsw = config_dsw();
-            machine_reset();
-            boot_difficulty = adjust_difficulty();
-            apply_rewind_setting();
-            ac.active = false;
-            frame_count = 0;
-            stop_audio();
+            hard_reset();
             menu_close();
             osd_message("Reset");
             return;
@@ -892,6 +919,29 @@ static void menu_change(int dir)
             break;
         case S_MUTE_BG: cfg.mute_unfocused = !cfg.mute_unfocused; break;
         case S_PAUSE_BG: cfg.pause_unfocused = !cfg.pause_unfocused; break;
+        case S_VERSION: {
+            int cur = machine_version();
+            if (cur < 0 || versions_there() < 2) return;
+            if (in_netplay()) { not_in_netplay(); return; }
+            if (version_pick < 0) version_pick = cur;
+            if (dir) {                              // browse the versions there are
+                int n = 0;
+                while (n < 4 && game.versions[n].label) n++;
+                do version_pick = (version_pick + dir + n) % n; while (!machine_version_available(version_pick));
+                break;
+            }
+            if (version_pick == cur) return;
+            char err[256];
+            if (!machine_switch_version(version_pick, err, sizeof err)) { osd_message("%s", err); return; }
+            snprintf(cfg.version, sizeof cfg.version, "%s", game.versions[version_pick].label);
+            version_pick = -1;
+            rec_unload();
+            hard_reset();
+            prepare_game_code();
+            menu_close();
+            osd_message("Version %s", cfg.version);
+            return;
+        }
         case S_DIFFICULTY: {
             if (in_netplay()) { not_in_netplay(); return; }
             int dl = adjust_difficulty();

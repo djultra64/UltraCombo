@@ -31,6 +31,7 @@ const rec_host_t *rec_host_info(void);
 rec_fn_t rec_lookup_slow(uint32_t pc);
 size_t   rec_state(uint8_t *buf, bool load);
 void     rec_forget(void);
+void     rec_unload(void);     // stop using the translated code (the game's code changed)
 void     rec_reset(void);
 extern rec_fn_t *rec_map;          // per-word entry, valid for the current rec_code_gen
 extern uint32_t rec_map_gen;

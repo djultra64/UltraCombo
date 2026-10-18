@@ -10,6 +10,7 @@ bool ide_open(const char *image, const char *settings, uint32_t cyls, uint32_t h
 const char *ide_chd_sha1(void);          // the CHD's SHA1 as chdman shows it, NULL for a raw file
 uint64_t ide_image_size(void);
 bool ide_write_raw(const char *path);    // write the image as a raw file
+void ide_use_settings(const char *path); // save the current settings file, switch to this one
 uint32_t ide_read(int reg);
 void ide_write(int reg, uint32_t v);
 uint32_t ide_alt_status(void);

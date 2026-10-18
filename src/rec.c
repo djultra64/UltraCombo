@@ -50,6 +50,9 @@ static bool use(const rec_module_t *m)
 
 void rec_init(void) { use(rec_module_init(rec_host_info())); }
 
+// The module itself stays loaded: little memory, and it is never called again.
+void rec_unload(void) { rec_enabled = false; rec_mod = NULL; }
+
 bool rec_use_module(rec_module_init_fn init) { return init && use(init(rec_host_info())); }
 
 static bool func_matches(uint32_t f)

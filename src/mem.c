@@ -1,6 +1,7 @@
 // I/O space. The two games' boards put the same ports at different
 // addresses (game.h).
 #include "mem.h"
+#include "cpu.h"
 #include "game.h"
 #include "ide.h"
 #include "sound.h"
@@ -32,9 +33,11 @@ static uint32_t io_read32(uint32_t pa)
     if (pa == game.io.unused) return 0xffffffffu;
     if (pa == 0x10000170) return ide_alt_status();
     if (pa >= 0x10000100 && pa < 0x10000140) return ide_read((pa - 0x10000100) >> 3);
-    static uint32_t last;
-    if (pa != last) { fprintf(stderr, "io: unmapped read %08x\n", pa); last = pa; }
-    return 0xffffffffu;
+    // Nothing there: reads give 0, as in MAME. KI1 v1.4 reads 32 KB past the end
+    // of RAM0 when it copies the screen from the second frame buffer.
+    static int logged;
+    if (logged < 8) fprintf(stderr, "io: unmapped read %08x (pc %08x)%s\n", pa, cpu.cur_pc, ++logged == 8 ? "; no more shown" : "");
+    return 0;
 }
 
 uint32_t io_read(uint32_t pa, int size)
@@ -70,6 +73,6 @@ void io_write(uint32_t pa, uint32_t val, int size)
     case 0x10000170: ide_devctl(val); return;
     }
     if (a >= 0x10000100 && a < 0x10000140) { ide_write((a - 0x10000100) >> 3, val); return; }
-    static uint32_t last;
-    if (a != last) { fprintf(stderr, "io: unmapped write %08x = %08x\n", pa, val); last = a; }
+    static int logged;
+    if (logged < 8) fprintf(stderr, "io: unmapped write %08x = %08x (pc %08x)%s\n", pa, val, cpu.cur_pc, ++logged == 8 ? "; no more shown" : "");
 }

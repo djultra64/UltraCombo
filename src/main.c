@@ -128,6 +128,51 @@ const char *find_data(const char *name, char *buf, size_t n)
     return readable(buf) ? buf : name;
 }
 
+static int version = -1;               // index into game.versions, -1 = custom ROM
+static char rom_dir[4096];             // folder of the boot ROM in use, with separator
+
+int machine_version(void) { return version; }
+
+// A version's boot ROM: beside the one in use, else where game files are looked for.
+static const char *version_rom(int v, char *buf, size_t n)
+{
+    snprintf(buf, n, "%s%s", rom_dir, game.versions[v].rom);
+    return *rom_dir && readable(buf) ? buf : find_data(game.versions[v].rom, buf, n);
+}
+
+bool machine_version_available(int v)
+{
+    if (v < 0 || v >= 4 || !game.versions[v].label) return false;
+    char buf[4096];
+    return readable(version_rom(v, buf, sizeof buf));
+}
+
+// saves/<boot ROM name without extension>.settings: one per game version
+static const char *settings_for(const char *rom_path, char *buf, size_t n)
+{
+    const char *base = strrchr(rom_path, '/'), *b2 = strrchr(rom_path, '\\');
+    if (b2 > base) base = b2;
+    base = base ? base + 1 : rom_path;
+    snprintf(buf, n, "%ssaves", data_dir());
+    make_dir(buf);
+    const char *dot = strchr(base, '.');
+    snprintf(buf, n, "%ssaves/%.*s.settings", data_dir(), (int)(dot ? (size_t)(dot - base) : strlen(base)), base);
+    return buf;
+}
+
+bool machine_switch_version(int v, char *err, size_t n)
+{
+    if (!machine_version_available(v)) { snprintf(err, n, "%s is not there", game.versions[v].rom); return false; }
+    char path[4096], settings[4400];
+    const char *p = version_rom(v, path, sizeof path);
+    static uint8_t buf[ROM_SIZE];
+    if (!load_file(p, buf, ROM_SIZE)) { snprintf(err, n, "%s can't be read", p); return false; }
+    memcpy(rom, buf, ROM_SIZE);
+    ide_use_settings(settings_for(p, settings, sizeof settings));
+    version = v;
+    return true;
+}
+
 // The disk: a raw image if there is one (it may hold settings written by
 // earlier versions), else the MAME CHD, also in MAME's own folder for it.
 static const char *find_disk(char *buf, size_t n)
@@ -414,6 +459,7 @@ static void usage(void)
         "  --rom PATH      boot ROM (%s)\n"
         "  --disk PATH     disk image: MAME's %s, or a raw image extracted from it\n"
         "  --settings PATH file for the game's settings and high scores (default: saves/)\n"
+        "  --game-version V  which version to run (as in the menu, e.g. 1.4)\n"
         "  --write-raw PATH  write the disk image out as a raw file and exit\n"
         "  --sound DIR     directory holding the 8 sound ROMs (%s...)\n"
         "  --headless N    run N frames without a window\n"
@@ -452,7 +498,8 @@ int main(int argc, char **argv)
     static char ini[4096];
     snprintf(ini, sizeof ini, "%s%s.ini", data_dir(), game.id);
     config_load(ini);
-    const char *rom_path = *cfg.rom ? cfg.rom : game.versions[0].rom;
+    const char *rom_path = *cfg.rom ? cfg.rom : NULL;       // NULL: the configured version
+    const char *want_version = cfg.version;
     const char *disk_path = *cfg.disk ? cfg.disk : NULL;     // NULL: look for one
     const char *settings_path = NULL, *write_raw = NULL;
     const char *sound_dir = *cfg.sound ? cfg.sound : ".";
@@ -465,6 +512,7 @@ int main(int argc, char **argv)
     uint32_t dis_addr = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_path = argv[++i];
+        else if (!strcmp(argv[i], "--game-version") && i + 1 < argc) want_version = argv[++i];
         else if (!strcmp(argv[i], "--disk") && i + 1 < argc) disk_path = argv[++i];
         else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settings_path = argv[++i];
         else if (!strcmp(argv[i], "--write-raw") && i + 1 < argc) write_raw = argv[++i];
@@ -506,7 +554,31 @@ int main(int argc, char **argv)
 
     headless_mode = headless || dis_count;
     static char rom_buf[4096], disk_buf[4096];
+    if (!rom_path) {
+        // the configured version, else the first one there is
+        for (int v = 0; v < 4 && game.versions[v].label; v++)
+            if (!strcmp(want_version, game.versions[v].label)) version = v;
+        if (version < 0 && *want_version) fprintf(stderr, "version %s: unknown, using %s\n", want_version, game.versions[0].label);
+        if (version < 0) version = 0;
+        if (!machine_version_available(version))
+            for (int v = 0; v < 4 && game.versions[v].label; v++)
+                if (machine_version_available(v)) {
+                    fprintf(stderr, "version %s: %s not found, using %s\n", game.versions[version].label,
+                            game.versions[version].rom, game.versions[v].label);
+                    version = v;
+                    break;
+                }
+        rom_path = game.versions[version].rom;
+    }
     rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
+    {
+        const char *base = strrchr(rom_path, '/'), *b2 = strrchr(rom_path, '\\');
+        if (b2 > base) base = b2;
+        base = base ? base + 1 : rom_path;
+        snprintf(rom_dir, sizeof rom_dir, "%.*s", (int)(base - rom_path), rom_path);
+        for (int v = 0; version < 0 && v < 4 && game.versions[v].label; v++)   // a ROM given by path
+            if (!strcmp(base, game.versions[v].rom)) version = v;
+    }
     disk_path = disk_path ? find_data(disk_path, disk_buf, sizeof disk_buf) : find_disk(disk_buf, sizeof disk_buf);
     if (write_raw) {                        // a tool: needs only the disk
         bool ok = ide_open(disk_path, NULL, game.cyls, game.heads, game.secs, game.serial_offset) && ide_write_raw(write_raw);
@@ -533,16 +605,7 @@ int main(int argc, char **argv)
     }
     // the game's settings and high scores: one file per boot ROM (game version)
     static char settings_buf[4400];
-    if (!settings_path) {
-        const char *base = strrchr(rom_path, '/'), *b2 = strrchr(rom_path, '\\');
-        if (b2 > base) base = b2;
-        base = base ? base + 1 : rom_path;
-        snprintf(settings_buf, sizeof settings_buf, "%ssaves", data_dir());
-        make_dir(settings_buf);
-        snprintf(settings_buf, sizeof settings_buf, "%ssaves/%.*s.settings", data_dir(),
-                 (int)(strchr(base, '.') ? (size_t)(strchr(base, '.') - base) : strlen(base)), base);
-        settings_path = settings_buf;
-    }
+    if (!settings_path) settings_path = settings_for(rom_path, settings_buf, sizeof settings_buf);
     if (!ide_open(disk_path, settings_path, game.cyls, game.heads, game.secs, game.serial_offset)) {
         report(true, "%s can't start: the disk image %s was not found or can't be read.\n\n%s", game.product, disk_path, files_help());
         return 1;
@@ -594,6 +657,16 @@ int main(int argc, char **argv)
         o = fopen("reset_core.bin", "wb"); fwrite(core, 1, n0 + n1 + n2 + n3 + n4, o); fclose(o);
         fprintf(stderr, "core parts: cpu %zu rec %zu ide %zu sound %zu machine %zu\n", n0, n1, n2, n3, n4);
         return 0;
+    }
+    if (getenv("KI2_SWITCH_TEST")) {        // testing: N:V runs N frames, then switches to version V
+        int n = 0, v = 0;
+        sscanf(getenv("KI2_SWITCH_TEST"), "%d:%d", &n, &v);
+        for (int i = 0; i < n; i++) run_frame();
+        char err[256], msg[512];
+        if (!machine_switch_version(v, err, sizeof err)) { fprintf(stderr, "%s\n", err); return 1; }
+        rec_unload();
+        machine_reset();
+        if (!getenv("KI2_NOREC") && rec_build_load_cached(msg, sizeof msg)) fprintf(stderr, "rec: %s\n", msg);
     }
     if (headless && (net_host || net_join)) return headless_netplay(headless, net_host, net_join, net_delay, net_fps, net_lat, net_jit, net_loss);
 

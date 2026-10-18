@@ -19,3 +19,10 @@ const char *base_dir(void);           // directory of the executable, with trail
 const char *data_dir(void);           // writable folder for settings, cache, states (trailing separator)
 const char *find_data(const char *name, char *buf, size_t n);
 int  frontend_main(void);             // windowed mode (frontend.c)
+
+// Game versions (game.versions): the boot ROM and its settings file.
+int  machine_version(void);           // index of the running one, -1 = a ROM given by path
+bool machine_version_available(int v);   // its boot ROM is there
+// Load version v's boot ROM and settings; then reset the machine and get its
+// translated code (the frontend does both).
+bool machine_switch_version(int v, char *err, size_t n);

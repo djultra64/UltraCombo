@@ -216,15 +216,28 @@ static bool open_image(const char *path)
     return true;
 }
 
-bool ide_open(const char *image, const char *settings, uint32_t cyls, uint32_t heads, uint32_t secs, int serial_offset)
+// The settings sectors: from the settings file once there is one, else from
+// the image (a raw file keeps what earlier versions wrote into it).
+static void load_settings(const char *settings)
 {
-    if (!open_image(image)) return false;
-    // the settings sectors: from the settings file once there is one, else
-    // from the image (a raw file keeps what earlier versions wrote into it)
     snprintf(settings_path, sizeof settings_path, "%s", settings ? settings : "");
     FILE *s = settings ? fopen(settings, "rb") : NULL;
     if (!s || fread(tracked, 1, IDE_TRACK_BYTES, s) != IDE_TRACK_BYTES) image_read(0, tracked, IDE_TRACK_BYTES);
     if (s) fclose(s);
+    tracked_unsaved = false;
+    memset(ide_dirty, 1, sizeof ide_dirty);     // save states and rewind see the change
+}
+
+void ide_use_settings(const char *path)
+{
+    ide_flush();
+    load_settings(path);
+}
+
+bool ide_open(const char *image, const char *settings, uint32_t cyls, uint32_t heads, uint32_t secs, int serial_offset)
+{
+    if (!open_image(image)) return false;
+    load_settings(settings);
     atexit(ide_flush);
 
     d.cyls = cyls; d.heads = heads; d.secs = secs;
