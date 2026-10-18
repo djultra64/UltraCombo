@@ -1,4 +1,6 @@
-# Killer Instinct 2 — native port
+# UltraCombo
+
+A native port for the Killer Instinct 2 arcade game.
 
 Runs the arcade game's own code (statically recompiled to C) on Linux and
 Windows, with the Midway DCS sound board and IDE hard disk emulated. You
@@ -13,7 +15,7 @@ Put these in `run/` (or point `ki2.ini` at them):
   `chdman extractraw -i kinst2.chd -o kinst2.raw`
 - `ki2_l1.u10` … `ki2_l1.u13`, `ki2_l1.u33` … `ki2_l1.u36` — sound ROMs
 
-Then start `ki2` (`ki2.exe` on Windows). On the first launch the program
+Then start `ultracombo` (`UltraCombo.exe` on Windows). On the first launch the program
 shows "PREPARING THE GAME FOR THIS PC": it boots your game files on its
 interpreter until the game has loaded its code, snapshots that code,
 translates it to C and compiles it into a native module. That takes about a
@@ -31,7 +33,7 @@ netplay works between them.
 
 Settings, the log, screenshots, states and the cache are written next to the
 program if that folder is writable, else into the user data folder
-(`%APPDATA%\KI2Port\ki2\` on Windows, `~/.local/share/KI2Port/ki2/` on
+(`%APPDATA%\UltraCombo\` on Windows, `~/.local/share/UltraCombo/` on
 Linux), whose `run/` folder is also searched for the game files.
 
 ### Building
@@ -40,7 +42,7 @@ Needs gcc, SDL2 and python3:
 
     make            # the program; builds the game code at first launch
     make recomp     # developers: link the game code in instead (a minute)
-    ./ki2
+    ./ultracombo
 
 `make recomp` puts the generated C in `build/rec/`, derived from your ROM;
 that binary contains game code and must not be shared.
@@ -50,15 +52,15 @@ that binary contains game code and must not be shared.
 Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
 official SDL2 MinGW package, unpacked into `deps/sdl2-mingw/`:
 
-    make windows    # -> dist/windows/ki2.exe + SDL2.dll
+    make windows    # -> dist/windows/UltraCombo.exe + SDL2.dll
 
 On Windows the log goes to `ki2.log` beside the executable. Linux and
 Windows builds emulate identically (same state after the same inputs).
 
 ### Release packages
 
-    make packages   # -> dist/KI2-Port-Linux.tar.xz, dist/KI2-Port-x86_64.AppImage,
-                    #    dist/KI2-Port-Windows.zip
+    make packages   # -> dist/UltraCombo-Linux.tar.xz, dist/UltraCombo-x86_64.AppImage,
+                    #    dist/UltraCombo-Windows.zip
 
 These hold the program, Zig and TinyCC, shaders and licences — no game files
 and no game code. They expect, in `deps/`: Zig 0.17 for Linux and Windows
@@ -70,7 +72,7 @@ from about 2020 on, and so is SDL2 2.32.10 (from its source release, into
 and `-idirafter /usr/include` so it finds the X11/Wayland/audio headers),
 which ships in `lib/`.
 
-    make package-appimage   # -> dist/KI2-Port-x86_64.AppImage
+    make package-appimage   # -> dist/UltraCombo-x86_64.AppImage
 
 The AppImage is the Linux package plus AppImage's static runtime
 (`deps/dl/appimage-runtime/runtime-x86_64`, from
@@ -143,7 +145,7 @@ ScaleFX and xBR. `make shaders-extra` adds xBRZ, crt-guest-dr-venom,
 crt-royale, crt-geom, crt-easymode, zfast-crt and crt-aperture (GPL
 licensed, kept as separate files in `shaders/extra/`). Each preset's
 `#pragma parameter` settings can be adjusted live in Shader parameters, and
-are remembered. `ki2 --test-shaders` checks that every preset compiles.
+are remembered. `ultracombo --test-shaders` checks that every preset compiles.
 
 Without OpenGL the game falls back to plain SDL drawing (sharp or smooth).
 
@@ -187,11 +189,11 @@ Two players over the internet with rollback netcode: your own inputs
 respond immediately, the opponent's are predicted and corrected, and the
 game stays perfectly in sync. Linux and Windows can play each other.
 
-- **Host:** menu → Netplay → *Host a game* (or `ki2 --host`). Your UDP port
+- **Host:** menu → Netplay → *Host a game* (or `ultracombo --host`). Your UDP port
   (`port` in ki2.ini, default 7845) must be reachable: forward it on your
   router, or both use a VPN such as Tailscale or ZeroTier.
 - **Join:** menu → Netplay → *Address* (type the host's IP or name), then
-  *Join a game* (or `ki2 --join HOST[:PORT]`).
+  *Join a game* (or `ultracombo --join HOST[:PORT]`).
 
 Both players need the same build, ROM and disk image (checked when
 connecting); the host's settings sectors and DIP switches are used. When
@@ -227,3 +229,11 @@ The game runs at 58.96 Hz. With `pacing = auto` a ~60 Hz display is
 driven by vsync for perfectly smooth motion (the game runs 1.7% fast to
 match); other refresh rates are timed by the sound card at the original
 speed.
+
+## Licence
+
+UltraCombo is MIT-licensed (`LICENSE`). That covers this project's own code
+only: the game, its code and its data belong to their owners, and you need
+your own copy. Bundled third-party parts keep their licences: stb_image
+(public domain / MIT), the shaders in `shaders/` (see `shaders/README.txt`),
+and in the release packages SDL2 (zlib), Zig (MIT) and TinyCC (LGPL 2.1).

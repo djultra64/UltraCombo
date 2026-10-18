@@ -1,4 +1,4 @@
-// Killer Instinct 2 native frontend.
+// UltraCombo: native frontend for the Killer Instinct 2 arcade game.
 #include "config.h"
 #include "cpu.h"
 #include "ide.h"
@@ -89,7 +89,7 @@ const char *data_dir(void)
         struct stat st;
         if (!stat(run, &st) && S_ISDIR(st.st_mode) && writable_dir(ai)) { dir = SDL_strdup(ai); return dir; }
     }
-    dir = SDL_GetPrefPath("KI2Port", "ki2");
+    dir = SDL_GetPrefPath("", "UltraCombo");
     if (!dir) dir = SDL_strdup(base_dir());
     return dir;
 }
@@ -309,7 +309,7 @@ static void report(bool fatal, const char *fmt, ...)
     va_end(ap);
     fprintf(stderr, "%s\n", msg);
     if (!headless_mode)
-        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, "Killer Instinct 2", msg, NULL);
+        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, "UltraCombo", msg, NULL);
 }
 
 static const char *files_help(void)
@@ -332,7 +332,7 @@ static const char *files_help(void)
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: ki2 [options]\n"
+        "usage: ultracombo [options]\n"
         "  --rom PATH      boot ROM (ki2-l14.u98)\n"
         "  --disk PATH     raw disk image extracted from kinst2.chd\n"
         "  --sound DIR     directory holding ki2_l1.u10..u36\n"
@@ -355,6 +355,12 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
+    // packaging helper: before anything writes a log or settings
+    if (argc == 3 && !strcmp(argv[1], "--write-icon")) {
+        size_t n = strlen(argv[2]);                     // .png: 256 pixels, else .ico
+        bool png = n > 4 && !strcmp(argv[2] + n - 4, ".png");
+        return (png ? icon_write_png(argv[2], 256) : icon_write_ico(argv[2])) ? 0 : 1;
+    }
 #ifdef _WIN32
     {   // a GUI program has no console: keep the log beside the executable
         static char log[4096];
@@ -402,12 +408,6 @@ int main(int argc, char **argv)
             if (!ok) fprintf(stderr, "recomp: %s\n", err);
             return ok ? 0 : 1;
         }
-        else if (!strcmp(argv[i], "--write-icon") && i + 1 < argc) {
-            const char *p = argv[++i];                  // .png: 256 pixels, else .ico
-            size_t n = strlen(p);
-            bool png = n > 4 && !strcmp(p + n - 4, ".png");
-            return (png ? icon_write_png(p, 256) : icon_write_ico(p)) ? 0 : 1;
-        }
         else if (!strcmp(argv[i], "--test-shaders")) { extern bool opt_test_shaders; opt_test_shaders = true; }
         else if (!strcmp(argv[i], "--join") && i + 1 < argc) { extern const char *opt_net_join; opt_net_join = argv[++i]; }
         else if (!strcmp(argv[i], "--net-host") && i + 1 < argc) net_host = argv[++i];
@@ -425,7 +425,7 @@ int main(int argc, char **argv)
     rom_path = find_data(rom_path, rom_buf, sizeof rom_buf);
     disk_path = find_data(disk_path, disk_buf, sizeof disk_buf);
     if (!load_file(rom_path, rom, ROM_SIZE)) {
-        report(true, "Killer Instinct 2 can't start: the boot ROM %s was not found or is incomplete.\n\n%s", rom_path, files_help());
+        report(true, "UltraCombo can't start: the boot ROM %s was not found or is incomplete.\n\n%s", rom_path, files_help());
         return 1;
     }
     if (dis_count) {
@@ -444,7 +444,7 @@ int main(int argc, char **argv)
     }
     // KI2 drive geometry from the CHD metadata; serial lives at identify word 11
     if (!ide_open(disk_path, 1463, 13, 47, 11)) {
-        report(true, "Killer Instinct 2 can't start: the disk image %s was not found.\n\n%s", disk_path, files_help());
+        report(true, "UltraCombo can't start: the disk image %s was not found.\n\n%s", disk_path, files_help());
         return 1;
     }
     static char snd_buf[4096];

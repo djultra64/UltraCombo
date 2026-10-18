@@ -1,5 +1,5 @@
 build/
-ki2
+ultracombo
 run/
 *.ppm
 *.png
@@ -11,5 +11,8 @@ deps/
 build-win/
 dist/
 shaders/extra/
-ki2-dist
+ultracombo-dist
 build-lnx/
+ki2
+*.wav
+ki2-dist
