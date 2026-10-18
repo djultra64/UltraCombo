@@ -1236,7 +1236,7 @@ static void prepare_game_code(void)
     bool ok = rec_build(prepare_progress, msg, sizeof msg);
     fprintf(stderr, "rec: %s (%.0f s)\n", msg, (SDL_GetTicks64() - t0) / 1000.0);
     osd_message("%s", ok ? "Ready" : "Running without translated code (slower)");
-    if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "UltraCombo",
+    if (!ok) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "UltraCombo 2",
         "The game code could not be prepared for full speed on this PC, so the game runs on the "
         "slower interpreter. ki2.log and cache/*/build.log in the game folder say why.", win);
 }
@@ -1256,7 +1256,7 @@ int frontend_main(void)
         if (f) { fclose(f); SDL_GameControllerAddMappingsFromFile(db); }
     }
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 3;
-    win = video_open("UltraCombo", 320 * scale, 240 * scale);
+    win = video_open("UltraCombo 2", 320 * scale, 240 * scale);
     if (!win) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     set_window_icon(win);
     if (cfg.window_w >= 320 && cfg.window_h >= 240) {

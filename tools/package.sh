@@ -3,26 +3,26 @@
 # build the game code on the player's machine, shaders and licences.
 # No game files and no game code go in.
 #
-#   tools/package.sh linux    PROGRAM libSDL2-2.0.so.0 -> dist/UltraCombo-Linux/
-#   tools/package.sh windows  PROGRAM SDL2.dll         -> dist/UltraCombo-Windows/
-#   tools/package.sh appimage RUNTIME                  -> dist/UltraCombo-x86_64.AppImage
-#     (from dist/UltraCombo-Linux; RUNTIME is AppImage's type2-runtime)
+#   tools/package.sh linux    PROGRAM libSDL2-2.0.so.0 -> dist/UltraCombo2-Linux/
+#   tools/package.sh windows  PROGRAM SDL2.dll         -> dist/UltraCombo2-Windows/
+#   tools/package.sh appimage RUNTIME                  -> dist/UltraCombo2-x86_64.AppImage
+#     (from dist/UltraCombo2-Linux; RUNTIME is AppImage's type2-runtime)
 set -e
 target=$1 prog=$2
 sdl_licence=deps/sdl2-lnx/SDL2-2.32.10/LICENSE.txt
 case $target in
-linux)   out=dist/UltraCombo-Linux   zig=deps/zig-linux   tcc=deps/tcc-lnx231 ;;
-windows) out=dist/UltraCombo-Windows zig=deps/zig-windows tcc=deps/tcc-win ;;
+linux)   out=dist/UltraCombo2-Linux   zig=deps/zig-linux   tcc=deps/tcc-lnx231 ;;
+windows) out=dist/UltraCombo2-Windows zig=deps/zig-windows tcc=deps/tcc-win ;;
 appimage)
     # an AppImage is the runtime followed by a squashfs of the program's folder
-    app=dist/UltraCombo.AppDir image=dist/UltraCombo-x86_64.AppImage
+    app=dist/UltraCombo2.AppDir image=dist/UltraCombo2-x86_64.AppImage
     rm -rf "$app" "$image"
-    cp -r dist/UltraCombo-Linux "$app"
+    cp -r dist/UltraCombo2-Linux "$app"
     rm -rf "$app/run"                   # game files go beside the AppImage
-    ln -s ultracombo "$app/AppRun"
-    "$app/ultracombo" --write-icon "$app/ultracombo.png"
-    ln -s ultracombo.png "$app/.DirIcon"
-    cp tools/ultracombo.desktop "$app/"
+    ln -s ultracombo2 "$app/AppRun"
+    "$app/ultracombo2" --write-icon "$app/ultracombo2.png"
+    ln -s ultracombo2.png "$app/.DirIcon"
+    cp tools/ultracombo2.desktop "$app/"
     mksquashfs "$app" dist/appimage.sqfs -root-owned -noappend -quiet -comp zstd -Xcompression-level 19 -b 1M
     cat "$prog" dist/appimage.sqfs > "$image"
     chmod +x "$image"
@@ -36,7 +36,7 @@ rm -rf "$out"
 mkdir -p "$out/run" "$out/tools/zig/lib" "$out/tools/tcc" "$out/licenses"
 cp "$prog" "$out/"
 cp README.md "$out/"
-cp LICENSE "$out/licenses/UltraCombo-LICENSE.txt"
+cp LICENSE "$out/licenses/UltraCombo2-LICENSE.txt"
 cp tools/dist-readme.txt "$out/READ-ME-FIRST.txt"
 cp tools/run-readme.txt "$out/run/PUT-GAME-FILES-HERE.txt"
 
@@ -70,7 +70,7 @@ if [ -d shaders/extra ]; then
     cp tools/gpl-3.0.txt "$out/licenses/GPL-3.0-shaders-extra.txt"   # xBRZ
 fi
 
-# SDL2: beside UltraCombo.exe; in lib/ on Linux (the program's rpath is $ORIGIN/lib)
+# SDL2: beside UltraCombo2.exe; in lib/ on Linux (the program's rpath is $ORIGIN/lib)
 cp "$sdl_licence" "$out/licenses/SDL2-LICENSE.txt"
 if [ $target = linux ]; then
     mkdir -p "$out/lib"

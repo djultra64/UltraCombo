@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=UltraCombo
+Name=UltraCombo 2
 Comment=Native port for the Killer Instinct 2 arcade game (bring your own game files)
-Exec=ultracombo
-Icon=ultracombo
+Exec=ultracombo2
+Icon=ultracombo2
 Categories=Game;ArcadeGame;
 Terminal=false

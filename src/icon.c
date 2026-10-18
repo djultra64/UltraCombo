@@ -1,4 +1,5 @@
-// Program icon: gold "KI2" on a dark red rounded tile, built from the OSD font.
+// Program icon: "UC2" on a dark red rounded tile with three claw slashes
+// behind it, built from the OSD font (no game art).
 #include "icon.h"
 #include "osd.h"
 #include "png.h"
@@ -6,32 +7,48 @@
 #include <stdio.h>
 #include <string.h>
 
+static uint32_t argb(float a, float r, float g, float b)
+{
+    return (uint32_t)(a * 255) << 24 | (uint32_t)(r * 255) << 16 | (uint32_t)(g * 255) << 8 | (uint32_t)(b * 255);
+}
+
 void icon_pixels(uint32_t *px, int size)
 {
     // tile: vertical gradient, rounded corners
-    float r = size * 0.18f;
+    float rad = size * 0.18f;
     for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++) {
-            float cx = x + 0.5f < r ? r : x + 0.5f > size - r ? size - r : x + 0.5f;
-            float cy = y + 0.5f < r ? r : y + 0.5f > size - r ? size - r : y + 0.5f;
+            float fx = (x + 0.5f) / size, fy = (y + 0.5f) / size;
+            float cx = x + 0.5f < rad ? rad : x + 0.5f > size - rad ? size - rad : x + 0.5f;
+            float cy = y + 0.5f < rad ? rad : y + 0.5f > size - rad ? size - rad : y + 0.5f;
             float d = hypotf(x + 0.5f - cx, y + 0.5f - cy);
-            float a = d > r ? 0 : d > r - 1 ? r - d : 1;
-            float t = (float)y / (float)size;
-            uint32_t red = (uint32_t)(0x70 - 0x50 * t), green = (uint32_t)(0x08 + 0x04 * t);
-            px[y * size + x] = (uint32_t)(a * 255) << 24 | red << 16 | green << 8 | 0x06;
+            float a = d > rad ? 0 : d > rad - 1 ? rad - d : 1;
+            float r = 0.42f - 0.32f * fy, g = 0.035f + 0.01f * fy, b = 0.025f + 0.015f * fy;
+            // claw slashes from top right to bottom left, tapered at both ends
+            if (size > 16)
+                for (int i = 0; i < 3; i++) {
+                    float along = fy, across = fx + 0.62f * fy - (0.70f + 0.17f * i);
+                    float w = 0.048f * sinf(3.14159f * along);
+                    float k = w > 0 ? 1 - fabsf(across) / w : 0;
+                    if (k > 0) {
+                        float m = k > 0.5f ? 1 : k * 2;          // soft edge
+                        m *= 0.6f;
+                        r += (0.95f - r) * m; g += (0.30f - g) * m; b += (0.10f - b) * m;
+                    }
+                }
+            px[y * size + x] = argb(a, r, g, b);
         }
-    // "KI2": 3 glyphs of 5x7, scaled to fit with a dark outline
-    const char *text = "KI2";
-    int scale = size / 20 > 0 ? size / 20 : 1;
-    if (size <= 16) scale = 1;
-    int gw = 5 * scale, gap = scale, tw = 3 * gw + 2 * gap, th = 7 * scale;
+    // "UC2": 3 glyphs of 5x7, scaled to fit with a dark outline; the 2 glows
+    const char *text = "UC2";
+    int scale = (int)(size * 0.82f / 17) > 0 ? (int)(size * 0.82f / 17) : 1;   // text ~80% wide
+    int gw = 5 * scale, gap = size <= 16 ? 0 : scale, tw = 3 * gw + 2 * gap, th = 7 * scale;
     int x0 = (size - tw) / 2, y0 = (size - th) / 2;
     for (int pass = 0; pass < 2; pass++)
         for (int c = 0; c < 3; c++) {
-            const uint8_t *g = osd_glyph(text[c]);
+            const uint8_t *gl = osd_glyph(text[c]);
             for (int col = 0; col < 5; col++)
                 for (int row = 0; row < 7; row++) {
-                    if (!(g[col] >> row & 1)) continue;
+                    if (!(gl[col] >> row & 1)) continue;
                     for (int dy = -1; dy <= scale; dy++)
                         for (int dx = -1; dx <= scale; dx++) {
                             bool inside = dx >= 0 && dy >= 0 && dx < scale && dy < scale;
@@ -40,8 +57,9 @@ void icon_pixels(uint32_t *px, int size)
                             int x = x0 + c * (gw + gap) + col * scale + dx, y = y0 + row * scale + dy;
                             if (x < 0 || y < 0 || x >= size || y >= size) continue;
                             float t = (float)(row * scale + dy) / (float)th;
-                            uint32_t gold = 0xff000000u | (uint32_t)(0xff) << 16 | (uint32_t)(0xe0 - 0x60 * t) << 8 | (uint32_t)(0x60 - 0x50 * t);
-                            px[y * size + x] = pass ? gold : 0xff200000u;
+                            uint32_t fill = c < 2 ? argb(1, 1, 0.88f - 0.38f * t, 0.38f - 0.32f * t)     // gold
+                                                  : argb(1, 1, 0.97f - 0.62f * t, 0.85f - 0.80f * t);    // white-hot to orange
+                            px[y * size + x] = pass ? fill : 0xff1a0000u;
                         }
                 }
         }

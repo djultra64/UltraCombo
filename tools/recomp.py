@@ -5,7 +5,7 @@ usage: recomp.py RAM0.bin RAM2.bin OUTDIR [COVER.bin]
 
 RAM0/RAM2 are snapshots taken after the game has loaded its code. COVER is an
 optional KI2_COVER dump from an interpreter run; its jump targets become extra
-entry points. The output (OUTDIR/rec_*.c) is compiled into ultracombo by the Makefile.
+entry points. The output (OUTDIR/rec_*.c) is compiled into ultracombo2 by the Makefile.
 
 Code is found by recursive descent from the reset entry and the exception
 vector, plus any word in RAM that points into the code (return addresses,

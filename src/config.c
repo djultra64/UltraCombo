@@ -208,7 +208,7 @@ static bool write_file(const char *path, bool defaults)
 {
     FILE *f = fopen(path, "w");
     if (!f) return false;
-    fprintf(f, "; UltraCombo settings. Delete this file to get the defaults back.\n");
+    fprintf(f, "; UltraCombo 2 settings. Delete this file to get the defaults back.\n");
     const char *sec = "";
     for (int i = 0; i < nopts; i++) {
         opt_t *o = &opts[i];

@@ -17,11 +17,11 @@ REC_OBJ = $(REC_SRC:.c=.o)
 endif
 REC_CFLAGS = -O1 -g0 -fno-strict-aliasing -Isrc -w
 
-ultracombo: $(OBJ) $(REC_OBJ)
+ultracombo2: $(OBJ) $(REC_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 # The distributable program: no game code inside; it builds that on first run.
-ultracombo-dist: $(OBJ) build/rec_none.o
+ultracombo2-dist: $(OBJ) build/rec_none.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 build/%.o: src/%.c src/*.h | build
@@ -40,11 +40,11 @@ build/rec/%.o: build/rec/%.c src/rec.h src/cpu.h src/mem.h
 # 1. boot on the interpreter until the game has loaded its code, snapshot RAM
 # 2. translate that code to C   3. rebuild with it
 SNAP_FRAMES ?= 900
-recomp: ultracombo
+recomp: ultracombo2
 	rm -rf build/rec build/snap && mkdir -p build/snap
-	cd build/snap && KI2_NOREC=1 KI2_DUMP_AT=$(SNAP_FRAMES) ../../ultracombo --headless $(SNAP_FRAMES)
-	mkdir -p build/rec && ./ultracombo --recomp build/snap/ram0.bin build/snap/ram2.bin build/rec
-	$(MAKE) ultracombo
+	cd build/snap && KI2_NOREC=1 KI2_DUMP_AT=$(SNAP_FRAMES) ../../ultracombo2 --headless $(SNAP_FRAMES)
+	mkdir -p build/rec && ./ultracombo2 --recomp build/snap/ram0.bin build/snap/ram2.bin build/rec
+	$(MAKE) ultracombo2
 
 build:
 	mkdir -p build
@@ -57,17 +57,17 @@ WIN_CFLAGS = -O2 -Wall -Wno-unused-parameter -I$(WIN_SDL)/include -I$(WIN_SDL)/i
 WIN_LIBS   = -L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -lws2_32 -mwindows -static-libgcc
 WIN_OBJ     = $(SRC:src/%.c=build-win/%.o) build-win/rec_headers.o build-win/rec_none.o
 
-windows: dist/windows/UltraCombo.exe
+windows: dist/windows/UltraCombo2.exe
 
-# no game code inside: UltraCombo.exe builds it on the player's PC at first launch
-dist/windows/UltraCombo.exe: $(WIN_OBJ) build-win/ki2-res.o
+# no game code inside: UltraCombo2.exe builds it on the player's PC at first launch
+dist/windows/UltraCombo2.exe: $(WIN_OBJ) build-win/ki2-res.o
 	mkdir -p dist/windows
 	$(WIN_CC) -o $@ $^ $(WIN_LIBS)
 
 # the icon is drawn by the program itself (no game art)
-build-win/ki2.ico: ultracombo
+build-win/ki2.ico: ultracombo2
 	@mkdir -p build-win
-	./ultracombo --write-icon $@
+	./ultracombo2 --write-icon $@
 
 build-win/ki2-res.o: src/ki2.rc build-win/ki2.ico
 	x86_64-w64-mingw32-windres -I build-win -o $@ src/ki2.rc
@@ -91,30 +91,30 @@ LNX_ZIG  ?= deps/zig-linux/zig
 LNX_SDL  ?= deps/sdl2-lnx/build/libSDL2-2.0.so.0
 LNX_SRC   = $(SRC) src/rec_none.c build/rec_headers.c
 
-build-lnx/ultracombo: $(LNX_SRC) src/*.h
+build-lnx/ultracombo2: $(LNX_SRC) src/*.h
 	mkdir -p build-lnx/inc/SDL2
 	for d in $(shell pkg-config --cflags-only-I sdl2 | sed "s/-I//g") $(wildcard /usr/include/*-linux-gnu/SDL2); do ln -sf $$d/*.h build-lnx/inc/SDL2/; done
 	$(LNX_ZIG) cc -target x86_64-linux-gnu.2.31 -O2 -w -Ibuild-lnx/inc -Ibuild-lnx/inc/SDL2 -o $@ $(LNX_SRC) \
 	    $(LNX_SDL) -Wl,-rpath,'$$ORIGIN/lib' -lm -ldl
 
 # Packages without game files or game code (tools/package.sh)
-package-linux: build-lnx/ultracombo
-	sh tools/package.sh linux build-lnx/ultracombo $(LNX_SDL)
-	tar -C dist -cJf dist/UltraCombo-Linux.tar.xz UltraCombo-Linux
+package-linux: build-lnx/ultracombo2
+	sh tools/package.sh linux build-lnx/ultracombo2 $(LNX_SDL)
+	tar -C dist -cJf dist/UltraCombo2-Linux.tar.xz UltraCombo2-Linux
 
 # AppImage's runtime: github.com/AppImage/type2-runtime (static, needs no libfuse2)
 APPIMAGE_RUNTIME ?= deps/dl/appimage-runtime/runtime-x86_64
 package-appimage: package-linux
 	sh tools/package.sh appimage $(APPIMAGE_RUNTIME)
 
-package-windows: dist/windows/UltraCombo.exe
-	sh tools/package.sh windows dist/windows/UltraCombo.exe $(WIN_SDL)/bin/SDL2.dll
-	cd dist && rm -f UltraCombo-Windows.zip && zip -qr9 UltraCombo-Windows.zip UltraCombo-Windows
+package-windows: dist/windows/UltraCombo2.exe
+	sh tools/package.sh windows dist/windows/UltraCombo2.exe $(WIN_SDL)/bin/SDL2.dll
+	cd dist && rm -f UltraCombo2-Windows.zip && zip -qr9 UltraCombo2-Windows.zip UltraCombo2-Windows
 
 packages: package-appimage package-windows
 
 clean:
-	rm -rf build build-win build-lnx dist ultracombo ultracombo-dist
+	rm -rf build build-win build-lnx dist ultracombo2 ultracombo2-dist
 
 # GPL-licensed libretro shaders (xBRZ, crt-guest, crt-royale, ...) for local
 # use: fetched from github.com/libretro/glsl-shaders into deps/.
