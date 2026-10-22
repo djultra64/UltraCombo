@@ -60,6 +60,16 @@ recomp: ultracombo
 build:
 	mkdir -p build
 
+# Synthetic state-file tests do not need SDL or game files.
+.PHONY: test test-state-files
+test: test-state-files
+
+test-state-files: build/test_state_files
+	./build/test_state_files build/test-state-files.tmp
+
+build/test_state_files: tests/test_state_files.c src/state.c src/*.h | build
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Wno-sign-compare -Isrc src/state.c tests/test_state_files.c -o $@
+
 # Windows build, cross-compiled with MinGW-w64 against the official SDL2
 # MinGW package (unpacked into deps/sdl2-mingw). Output: dist/windows/.
 WIN_CC   ?= x86_64-w64-mingw32-gcc
