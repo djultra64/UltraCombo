@@ -216,6 +216,16 @@ licensed, kept as separate files in `shaders/extra/`). Each preset's
 are remembered. `ultracombo --test-shaders` checks that every preset
 compiles.
 
+**Lola Retro** (`lola-retro/arcade-15khz`, and `-flat` without curvature)
+models a 15 kHz arcade monitor on RGB: the beam, slot mask, glow and curved
+glass, built from a real tube's measurements. Its parameters set the colour,
+curvature, mask strength, glow and overscan. Set **Around the tube** to 1 to
+draw the monitor's casing in a room (2–11: moving scenes), and use the
+*stretch* scaling so it fills the window. The tube itself stays 4:3. It is
+the heaviest preset: it needs OpenGL 3.3 and a reasonably recent GPU. From
+[Lola Retro](https://github.com/zoran123456/lola-retro) by Zoki (MIT); `make
+shaders-lola` regenerates it.
+
 Without OpenGL the game falls back to plain SDL drawing (sharp or smooth).
 
 ## Training mode

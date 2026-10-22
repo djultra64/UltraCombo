@@ -9,6 +9,11 @@ kept in each file):
   scalefx/               MIT (Sp00kyFox)
   xbr/                   MIT (Hyllian)
 
+lola-retro/ is Lola Retro's arcade-15khz preset (MIT, Zoki; licence in that
+folder), from https://github.com/zoran123456/lola-retro. Its slang passes are
+converted to GLSL by its own tools/make_glsl.py, through tools/lola_retro.py
+(`make shaders-lola`). The files are generated, so don't edit them.
+
 `make shaders-extra` installs more into shaders/extra/: xBRZ, crt-guest,
 crt-royale, crt-geom, crt-easymode, zfast-crt and crt-aperture. Those are
 GPL-licensed; they are separate files read at run time, and keep their

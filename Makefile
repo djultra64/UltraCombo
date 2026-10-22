@@ -145,4 +145,14 @@ shaders-extra:
 	    cd $(SHADER_REPO) && git sparse-checkout set crt xbrz blurs)
 	python3 tools/install_shaders.py $(SHADER_REPO) shaders/extra $(EXTRA_SHADERS)
 
-.PHONY: all clean recomp windows shaders-extra package-linux package-appimage package-windows packages
+# Lola Retro (MIT): regenerates the bundled shaders/lola-retro from a pinned
+# commit of github.com/zoran123456/lola-retro.
+LOLA_REPO = deps/lola-retro
+LOLA_COMMIT = 330feccbcae72d336479844d22ce156bd390a5bd
+
+shaders-lola:
+	test -d $(LOLA_REPO) || git clone -q https://github.com/zoran123456/lola-retro.git $(LOLA_REPO)
+	cd $(LOLA_REPO) && (git checkout -q $(LOLA_COMMIT) || (git fetch -q origin && git checkout -q $(LOLA_COMMIT)))
+	python3 tools/lola_retro.py $(LOLA_REPO) shaders/lola-retro
+
+.PHONY: all clean recomp windows shaders-extra shaders-lola package-linux package-appimage package-windows packages

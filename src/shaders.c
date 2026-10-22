@@ -7,7 +7,9 @@
 // (its input) a pass can sample OrigTexture, PrevTexture/Prev1-6Texture
 // (earlier frames), PassPrevNTexture (N passes back; the pass before the
 // first is the original), PassNTexture, <alias>Texture and lookup textures
-// by name, each with matching TextureSize/InputSize uniforms.
+// by name, each with matching TextureSize/InputSize uniforms. Amiberry's
+// names work too: Source for Texture, Original for OrigTexture, an alias by
+// its plain name, and OrigTextureSize without an Orig sampler.
 //
 // Inside the chain an image's top row is at texture y = 0; the last pass
 // flips to the screen.
@@ -65,7 +67,7 @@ typedef struct {
     char alias[64];
     GLuint fbo, tex;
     int w, h;
-    GLint u_mvp, u_count, u_dir, u_out, u_texsize, u_insize, u_texture;
+    GLint u_mvp, u_count, u_dir, u_out, u_texsize, u_insize, u_texture, u_origsize, u_originsize;
     bind_t bind[MAX_BINDS];
     int nbind;
     GLint u_param[MAX_PARAMS];
@@ -323,7 +325,8 @@ static void add_bind(pass_t *ps, const char *base, int src)
     char n[160];
     snprintf(n, sizeof n, "%sTexture", base);
     GLint t = p_glGetUniformLocation(ps->prog, n);
-    if (t < 0 && src >= SRC_LUT) t = p_glGetUniformLocation(ps->prog, base);   // lookup textures go by plain name
+    if (t < 0 && src >= 0) t = p_glGetUniformLocation(ps->prog, base);   // lookup textures and aliases by plain name
+    if (t < 0 && !strcmp(base, "Orig")) t = p_glGetUniformLocation(ps->prog, "Original");
     if (t < 0 || ps->nbind >= MAX_BINDS) return;
     bind_t *b = &ps->bind[ps->nbind];
     b->tex = t;
@@ -345,6 +348,9 @@ static void find_uniforms(int i)
     ps->u_texsize = p_glGetUniformLocation(p, "TextureSize");
     ps->u_insize = p_glGetUniformLocation(p, "InputSize");
     ps->u_texture = p_glGetUniformLocation(p, "Texture");
+    if (ps->u_texture < 0) ps->u_texture = p_glGetUniformLocation(p, "Source");
+    ps->u_origsize = p_glGetUniformLocation(p, "OrigTextureSize");
+    ps->u_originsize = p_glGetUniformLocation(p, "OrigInputSize");
     ps->nbind = 0;
     add_bind(ps, "Orig", SRC_ORIG);
     add_bind(ps, "Prev", SRC_HIST - 1);
@@ -619,6 +625,8 @@ void shader_render(const uint32_t *px, SDL_Rect vp, int drawable_h)
         if (ps->u_out >= 0) p_glUniform2f(ps->u_out, (GLfloat)w, (GLfloat)h);
         if (ps->u_texsize >= 0) p_glUniform2f(ps->u_texsize, (GLfloat)in_w, (GLfloat)in_h);
         if (ps->u_insize >= 0) p_glUniform2f(ps->u_insize, (GLfloat)in_w, (GLfloat)in_h);
+        if (ps->u_origsize >= 0) p_glUniform2f(ps->u_origsize, SRC_W, SRC_H);
+        if (ps->u_originsize >= 0) p_glUniform2f(ps->u_originsize, SRC_W, SRC_H);
         for (int k = 0; k < nparams; k++) if (ps->u_param[k] >= 0) p_glUniform1f(ps->u_param[k], params[k].value);
 
         for (int b = 0; b < ps->nbind; b++) {
