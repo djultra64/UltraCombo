@@ -7,5 +7,8 @@
 // files were found (a game without them can't be chosen). Returns the
 // chosen profile, or NULL if the window was closed.
 const game_t *picker_choose(const game_t *const *games, const bool *installed, int initial);
+// A plain window showing text until closed, for when SDL's message box can't
+// open (no zenity and no X core fonts). False if no window could be made.
+bool picker_message(const char *title, const char *text);
 // Whether version v's boot ROM of game g is there (main.c).
 bool picker_version_there(const game_t *g, int v);

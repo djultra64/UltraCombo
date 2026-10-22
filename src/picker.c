@@ -173,3 +173,83 @@ const game_t *picker_choose(const game_t *const *games, const bool *installed, i
     SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
     return chosen;
 }
+
+// Lower case for the message window: paths must keep their case. Same 5x7
+// layout as the OSD font (osd_glyph), 'a'..'z'.
+static const uint8_t lower[26][5] = {
+    {0x20,0x54,0x54,0x54,0x78},{0x7f,0x48,0x44,0x44,0x38},{0x38,0x44,0x44,0x44,0x20},{0x38,0x44,0x44,0x48,0x7f},
+    {0x38,0x54,0x54,0x54,0x18},{0x08,0x7e,0x09,0x01,0x02},{0x0c,0x52,0x52,0x52,0x3e},{0x7f,0x08,0x04,0x04,0x78},
+    {0x00,0x44,0x7d,0x40,0x00},{0x20,0x40,0x44,0x3d,0x00},{0x7f,0x10,0x28,0x44,0x00},{0x00,0x41,0x7f,0x40,0x00},
+    {0x7c,0x04,0x18,0x04,0x78},{0x7c,0x08,0x04,0x04,0x78},{0x38,0x44,0x44,0x44,0x38},{0x7c,0x14,0x14,0x14,0x08},
+    {0x08,0x14,0x14,0x18,0x7c},{0x7c,0x08,0x04,0x04,0x08},{0x48,0x54,0x54,0x54,0x20},{0x04,0x3f,0x44,0x40,0x20},
+    {0x3c,0x40,0x40,0x20,0x7c},{0x1c,0x20,0x40,0x20,0x1c},{0x3c,0x40,0x30,0x40,0x3c},{0x44,0x28,0x10,0x28,0x44},
+    {0x0c,0x50,0x50,0x50,0x3c},{0x44,0x64,0x54,0x4c,0x44},
+};
+
+#define MSG_COLS 150
+#define MSG_ROWS 40
+
+static void msg_line(uint32_t *px, int pw, int x, int y, const char *s, size_t n, uint32_t rgb)
+{
+    for (size_t i = 0; i < n && i < MSG_COLS; i++, x += 6) {
+        char c = s[i];
+        const uint8_t *g = c >= 'a' && c <= 'z' ? lower[c - 'a'] : osd_glyph(c);
+        for (int col = 0; col < 5; col++)
+            for (int row = 0; row < 7; row++)
+                if (g[col] >> row & 1) px[(y + row) * pw + x + col] = rgb;
+    }
+}
+
+bool picker_message(const char *title, const char *text)
+{
+    static const char footer[] = "Enter or Esc to close";
+    int cols = (int)strlen(footer), rows = 0;
+    for (const char *s = text; *s && rows < MSG_ROWS; rows++) {     // measure
+        size_t n = strcspn(s, "\n");
+        if ((int)n > cols) cols = n < MSG_COLS ? (int)n : MSG_COLS;
+        s += n + (s[n] == '\n');
+    }
+    int pw = cols * 6 + 24, ph = rows * 10 + 44;
+    static uint32_t px[(MSG_COLS * 6 + 24) * (MSG_ROWS * 10 + 44)];
+    for (int i = 0; i < pw * ph; i++) px[i] = 0x140808;
+    int y = 12, rows_drawn = 0;
+    for (const char *s = text; *s && rows_drawn < MSG_ROWS; rows_drawn++, y += 10) {
+        size_t n = strcspn(s, "\n");
+        msg_line(px, pw, 12, y, s, n, 0xe0e0e0);
+        s += n + (s[n] == '\n');
+    }
+    msg_line(px, pw, (pw - (int)strlen(footer) * 6) / 2, ph - 18, footer, strlen(footer), 0x808080);
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) return false;
+    int scale = pw * 2 <= 1600 ? 2 : 1;                  // doubled when it fits a laptop screen
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, pw * scale, ph * scale, SDL_WINDOW_RESIZABLE);
+    SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, 0) : NULL;
+    if (!r && win) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    SDL_Texture *tex = r ? SDL_CreateTexture(r, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STATIC, pw, ph) : NULL;
+    if (!tex) {
+        if (r) SDL_DestroyRenderer(r);
+        if (win) SDL_DestroyWindow(win);
+        return false;
+    }
+    SDL_RenderSetLogicalSize(r, pw, ph);
+    SDL_UpdateTexture(tex, NULL, px, pw * 4);
+    for (bool done = false; !done;) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_QUIT) done = true;
+            if (ev.type == SDL_KEYDOWN && (ev.key.keysym.sym == SDLK_ESCAPE || ev.key.keysym.sym == SDLK_RETURN ||
+                                           ev.key.keysym.sym == SDLK_KP_ENTER || ev.key.keysym.sym == SDLK_SPACE)) done = true;
+            if (ev.type == SDL_CONTROLLERDEVICEADDED) SDL_GameControllerOpen(ev.cdevice.which);
+            if (ev.type == SDL_CONTROLLERBUTTONDOWN) done = true;
+        }
+        SDL_RenderClear(r);
+        SDL_RenderCopy(r, tex, NULL, NULL);
+        SDL_RenderPresent(r);
+        SDL_Delay(30);
+    }
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(r);
+    SDL_DestroyWindow(win);
+    return true;
+}

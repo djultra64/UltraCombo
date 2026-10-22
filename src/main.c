@@ -439,8 +439,8 @@ static void report(bool fatal, const char *fmt, ...)
     vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
     fprintf(stderr, "%s\n", msg);
-    if (!headless_mode)
-        SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, game.product, msg, NULL);
+    if (!headless_mode && SDL_ShowSimpleMessageBox(fatal ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_WARNING, game.product, msg, NULL) != 0)
+        picker_message(game.product, msg);      // no zenity and no X core fonts: our own window
 }
 
 static const char *files_help(void)
