@@ -84,6 +84,26 @@ static size_t unpack_xor(uint8_t *dst, const uint8_t *in)
     return (size_t)(p - in);
 }
 
+// Admit the whole file before unpack_xor can read it or change live memory.
+// Rewind entries are internal; only file input needs this bounds check.
+static bool valid_pages(const uint8_t *p, const uint8_t *end)
+{
+    for (uint32_t g = 0; g < NPAGES; g++) {
+        unsigned words = 0;
+        while (words < PAGE / 4) {
+            if ((size_t)(end - p) < 4) return false;
+            uint16_t zc, lc;
+            memcpy(&zc, p, 2); memcpy(&lc, p + 2, 2); p += 4;
+            if ((!zc && !lc) || zc > PAGE / 4 - words) return false;
+            words += zc;
+            if (lc > PAGE / 4 - words || (size_t)(end - p) < (size_t)lc * 4) return false;
+            words += lc;
+            p += (size_t)lc * 4;
+        }
+    }
+    return p == end;
+}
+
 /* ---------------------------------------------------------------- */
 /* Rewind history                                                    */
 /* ---------------------------------------------------------------- */
@@ -302,6 +322,13 @@ bool state_load_file(const char *path)
         ok = false;
     }
     if (!ok) { free(data); return false; }
+
+    if (core_len > (size_t)len - sizeof h ||
+        !valid_pages(data + sizeof h + core_len, data + len)) {
+        fprintf(stderr, "state: %s is invalid or truncated\n", path);
+        free(data);
+        return false;
+    }
 
     const uint8_t *p = data + sizeof h, *end = data + len;
     const uint8_t *core_in = p;

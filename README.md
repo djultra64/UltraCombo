@@ -310,6 +310,15 @@ game code and must not be shared. `tools/regress.sh` runs a fixed scripted
 fight and prints a state hash, to check that a change doesn't alter
 emulation (see `CLAUDE.md`).
 
+### State file tests
+
+`make test-state-files` runs state-file admission and restoration tests with synthetic RAM,
+disk settings and fixed-size device serializers; no SDL or game files are needed.
+It checks valid round trips, truncated cores/pages/literals, invalid run lengths,
+zero-progress tokens, incompatible headers and trailing data. A rejected file must
+leave live memory, devices and rewind history unchanged. The on-disk format is
+unchanged. These are file-format tests, not an original-game regression run.
+
 ### Windows
 
 Cross-compiled from Linux with MinGW-w64 (`gcc-mingw-w64-x86-64`) and the
