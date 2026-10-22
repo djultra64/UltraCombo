@@ -503,6 +503,8 @@ static bool installed(const game_t *g)
     return false;
 }
 
+static bool any_installed(void) { return installed(&game_ki1) || installed(&game_ki2); }
+
 bool picker_version_there(const game_t *g, int v)
 {
     char buf[4096];
@@ -532,6 +534,19 @@ static bool choose_game(const char *want, bool headless)
         bool have[2] = { installed(&game_ki1), installed(&game_ki2) };
         const game_t *const both[2] = { &game_ki1, &game_ki2 };
         int lasti = game_find(last) == &game_ki1 ? 0 : 1;
+        if (!have[0] && !have[1] && !headless) {         // neither: the welcome screen, until they're there
+            char folder[4200], alt[4200] = "";
+            if (appimage_dir() && strcmp(appimage_dir(), data_dir())) {
+                snprintf(folder, sizeof folder, "%srun", appimage_dir());
+                snprintf(alt, sizeof alt, "%srun", data_dir());
+            } else
+                snprintf(folder, sizeof folder, "%srun", data_dir());
+            fprintf(stderr, "No game files found. Put them in %s%s%s (see README.md).\n", folder, *alt ? " or " : "", alt);
+            int w = picker_welcome(both, folder, alt, any_installed);
+            if (w == 0) return false;                    // closed
+            have[0] = installed(&game_ki1);              // no window: the missing-file message follows
+            have[1] = installed(&game_ki2);
+        }
         if (have[0] != have[1]) g = have[0] ? &game_ki1 : &game_ki2;
         else if (!have[0] || headless) g = both[lasti];       // none: its error explains what's missing
         else if (!(g = picker_choose(both, have, lasti))) return false;
