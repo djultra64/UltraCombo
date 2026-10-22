@@ -671,7 +671,7 @@ static void draw_menu(uint32_t *out)
                  cfg.pacing == PACING_AUTO ? (vsync ? ": vsync" : ": audio") : "");
         snprintf(b[G_PERF], 72, "Performance overlay\t%s", onoff[cfg.perf_overlay]);
         snprintf(b[G_BACK], 72, "Back");
-        pad_prompt_footer(&pad_prompt, prompt_override(), "CHANGE", "BACK", footer, sizeof footer);
+        pad_prompt_adjust_footer(&pad_prompt, prompt_override(), footer, sizeof footer);
         break;
     }
     case PG_PARAMS:

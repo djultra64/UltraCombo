@@ -21,3 +21,4 @@ void pad_prompt_init(pad_prompt_t *prompt);
 void pad_prompt_event(pad_prompt_t *prompt, const SDL_Event *event);
 void pad_prompt_footer(const pad_prompt_t *prompt, int override,
                        const char *select, const char *back, char *out, size_t n);
+void pad_prompt_adjust_footer(const pad_prompt_t *prompt, int override, char *out, size_t n);

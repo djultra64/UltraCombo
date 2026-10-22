@@ -14,7 +14,7 @@ int pad_family_for_type(SDL_GameControllerType type)
     case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
     case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
         return PAD_FAMILY_SWITCH;
-    default: return PAD_FAMILY_GENERIC;
+    default: return PAD_FAMILY_XBOX;
     }
 }
 
@@ -122,4 +122,12 @@ void pad_prompt_footer(const pad_prompt_t *prompt, int override,
         b = pad_button_name(pad, override, SDL_CONTROLLER_BUTTON_B);
     }
     snprintf(out, n, "%s %s   %s %s", a, select, b, back);
+}
+
+void pad_prompt_adjust_footer(const pad_prompt_t *prompt, int override, char *out, size_t n)
+{
+    SDL_GameController *pad = SDL_GameControllerFromInstanceID(prompt->last_pad);
+    const char *back = prompt->using_pad && pad ?
+        pad_button_name(pad, override, SDL_CONTROLLER_BUTTON_B) : "ESC";
+    snprintf(out, n, "LEFT/RIGHT CHANGE   %s BACK", back);
 }

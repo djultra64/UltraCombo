@@ -42,7 +42,18 @@ int main(int argc, char **argv)
     check(pad_family_for_type(SDL_CONTROLLER_TYPE_XBOXONE) == PAD_FAMILY_XBOX, "detect Xbox");
     check(pad_family_for_type(SDL_CONTROLLER_TYPE_PS5) == PAD_FAMILY_PLAYSTATION, "detect PlayStation");
     check(pad_family_for_type(SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO) == PAD_FAMILY_SWITCH, "detect Switch");
-    check(pad_family_for_type(SDL_CONTROLLER_TYPE_UNKNOWN) == PAD_FAMILY_GENERIC, "unknown is positional");
+    check(pad_family_for_type(SDL_CONTROLLER_TYPE_UNKNOWN) == PAD_FAMILY_XBOX, "unknown falls back to Xbox");
+    const char *const xbox[] = {"A", "B", "X", "Y"};
+    const char *const positions[] = {"South", "East", "West", "North"};
+    for (int b = 0; b < 4; b++) {
+        check(!strcmp(pad_button_name(NULL, PAD_FAMILY_AUTO, b), xbox[b]), "no controller uses Xbox-style names");
+        check(!strcmp(pad_button_name(NULL, PAD_FAMILY_GENERIC, b), positions[b]), "positions remain an explicit option");
+    }
+    pad_prompt_t initial_prompt;
+    pad_prompt_init(&initial_prompt);
+    char initial_footer[96];
+    pad_prompt_adjust_footer(&initial_prompt, PAD_FAMILY_AUTO, initial_footer, sizeof initial_footer);
+    check(!strcmp(initial_footer, "LEFT/RIGHT CHANGE   ESC BACK"), "graphics keeps keyboard adjustment and back hints");
     check(!strcmp(pad_button_name(NULL, PAD_FAMILY_GENERIC, SDL_CONTROLLER_BUTTON_A), "South"), "unknown south");
     check(!strcmp(pad_button_name(NULL, PAD_FAMILY_PLAYSTATION, SDL_CONTROLLER_BUTTON_A), "Cross"), "PS south");
     check(!strcmp(pad_button_name(NULL, PAD_FAMILY_PLAYSTATION, PAD_RT), "R2"), "PS trigger");
@@ -81,6 +92,9 @@ int main(int argc, char **argv)
         char footer[96];
         pad_prompt_footer(&prompt, PAD_FAMILY_AUTO, "SELECT", "BACK", footer, sizeof footer);
         check(!strcmp(footer, labels ? "A SELECT   B BACK" : "B SELECT   A BACK"), "menu describes the actual select/back actions");
+        pad_prompt_adjust_footer(&prompt, PAD_FAMILY_AUTO, footer, sizeof footer);
+        check(!strcmp(footer, labels ? "LEFT/RIGHT CHANGE   B BACK" : "LEFT/RIGHT CHANGE   A BACK"),
+              "graphics keeps the adjustment hint and physical Switch back button");
         ev.type = SDL_KEYDOWN;
         pad_prompt_event(&prompt, &ev);
         pad_prompt_footer(&prompt, PAD_FAMILY_AUTO, "SELECT", "BACK", footer, sizeof footer);
@@ -111,6 +125,15 @@ int main(int argc, char **argv)
     check(!strcmp(pad_button_name(pad, PAD_FAMILY_AUTO, SDL_CONTROLLER_BUTTON_A), "A"), "Xbox south remains A");
     SDL_GameControllerClose(pad);
     check(SDL_JoystickDetachVirtual(index) == 0, "detach Xbox");
+
+    pad = virtual_pad("unknown", false, &index);
+    check(pad_label_family(pad, PAD_FAMILY_AUTO) == PAD_FAMILY_XBOX, "unidentified USB pad uses Xbox-style fallback");
+    for (int b = 0; b < 4; b++) {
+        check(!strcmp(pad_button_name(pad, PAD_FAMILY_AUTO, b), xbox[b]), "generic-pad action labels stay A/B/X/Y");
+        check(!strcmp(pad_button_name(pad, PAD_FAMILY_GENERIC, b), positions[b]), "generic-pad positions can still be selected manually");
+    }
+    SDL_GameControllerClose(pad);
+    check(SDL_JoystickDetachVirtual(index) == 0, "detach unidentified pad");
 
     game_select(&game_ki1);
     FILE *ini = fopen(argv[1], "w");

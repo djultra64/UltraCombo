@@ -101,8 +101,9 @@ as "SHA1" (the one MAME uses):
 
 Start `ultracombo` (`UltraCombo.exe` on Windows; the AppImage on Linux).
 With both games installed it asks which to play: left/right (or a click)
-chooses, Enter or the controller select button starts (shown on screen). It remembers the last choice. With one game
-installed it starts that one straight away. Menu → **Change game** goes back
+chooses, Enter or the controller select button starts (shown on screen).
+It remembers the last choice. With one game installed it starts that one
+straight away. Menu → **Change game** goes back
 to the choice, and `--game ki1` or `--game ki2` skips it (for shortcuts).
 
 The first time you play each game, and each version of it, the program shows
@@ -197,12 +198,14 @@ together count as neither, up and down together as up, like fight sticks),
   run-ahead and rewind.
 
 Button labels follow the last controller used; keyboard input switches menu
-prompts back to keyboard names. Xbox, PlayStation and Nintendo Switch layouts are
-detected through SDL. Unknown controllers use position names (South/East/West/North).
-Controls → P1/P2 button labels overrides the detected family when an adapter hides
-it; this changes labels only, not the bindings. SDL's Nintendo letter-based and
-positional mappings are both respected, including the exchanged A/B and X/Y
-positions. The shared gamepad-binding page shows labels for the last pad used.
+prompts back to keyboard names. Xbox, PlayStation and Nintendo Switch layouts
+are detected through SDL. Before a controller is used, and for controllers
+SDL cannot identify, labels fall back to Xbox-style A/B/X/Y names. Controls →
+P1/P2 button labels overrides the detected family when an adapter hides it;
+Positions remains available for South/East/West/North names. This changes
+labels only, not the bindings. SDL's Nintendo letter-based and positional
+mappings are both respected, including the exchanged A/B and X/Y positions.
+The shared gamepad-binding page shows labels for the last pad used.
 
 The window's size and position are remembered between runs.
 
@@ -326,6 +329,7 @@ It checks valid round trips, truncated cores/pages/literals, invalid run lengths
 zero-progress tokens, incompatible headers and trailing data. A rejected file must
 leave live memory, devices and rewind history unchanged. The on-disk format is
 unchanged. These are file-format tests, not an original-game regression run.
+
 ### Controller label tests
 
 `make test-controller-labels` runs controller-label, last-device prompt and configuration tests

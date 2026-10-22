@@ -69,6 +69,7 @@ test-state-files: build/test_state_files
 
 build/test_state_files: tests/test_state_files.c src/state.c src/*.h | build
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Wno-sign-compare -Isrc src/state.c tests/test_state_files.c -o $@
+
 test-controller-labels: build/test_controller_labels
 	./build/test_controller_labels build/test-controller-labels.ini
 
