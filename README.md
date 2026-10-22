@@ -324,7 +324,7 @@ the same inputs).
 ### Release packages
 
     make packages   # -> dist/UltraCombo-Windows.zip, dist/UltraCombo-Linux.tar.xz,
-                    #    dist/UltraCombo-x86_64.AppImage
+                    #    dist/UltraCombo-x86_64.AppImage and its .zsync
 
 These hold the program, Zig and TinyCC, SDL2 (Linux: in `lib/`), shaders and
 licences: no game files and no game code. They expect, in `deps/`:
@@ -343,6 +343,12 @@ licences: no game files and no game code. They expect, in `deps/`:
 The Linux program is built with Zig against glibc 2.31, so it runs on
 distributions from about 2020 on. The AppImage is the Linux package packed
 with `mksquashfs` behind that runtime.
+
+The AppImage carries update information for AppImageUpdate: the newest
+GitHub release, pre-release or not, and its `UltraCombo-x86_64.AppImage.zsync`.
+`zsyncmake` makes that file (package `zsync`; without root, `apt-get download
+zsync` and `dpkg-deb -x` it into `deps/zsync`); upload it to every release
+next to the AppImage, or updating breaks.
 
 "Killer Instinct" is a trademark of its owners; this project is not
 affiliated with them. Keep that in mind when naming anything you publish.

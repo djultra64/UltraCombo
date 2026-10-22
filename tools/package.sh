@@ -7,6 +7,7 @@
 #   tools/package.sh windows  PROGRAM SDL2.dll         -> dist/UltraCombo-Windows/
 #   tools/package.sh appimage RUNTIME                  -> dist/UltraCombo-x86_64.AppImage
 #     (from dist/UltraCombo-Linux; RUNTIME is AppImage's type2-runtime)
+#     and its .zsync, which goes in the release beside it
 set -e
 target=$1 prog=$2
 sdl_licence=deps/sdl2-lnx/SDL2-2.32.10/LICENSE.txt
@@ -23,11 +24,22 @@ appimage)
     "$app/ultracombo" --write-icon "$app/ultracombo.png"
     ln -s ultracombo.png "$app/.DirIcon"
     cp tools/ultracombo.desktop "$app/"
+    zsyncmake=$(command -v zsyncmake || echo "$PWD/deps/zsync/usr/bin/zsyncmake")
+    [ -x "$zsyncmake" ] || { echo "zsyncmake not found (package zsync, or unpacked into deps/zsync): needed for the AppImage's .zsync" >&2; exit 1; }
     mksquashfs "$app" dist/appimage.sqfs -root-owned -noappend -quiet -comp zstd -Xcompression-level 19 -b 1M
-    cat "$prog" dist/appimage.sqfs > "$image"
+    # update information for AppImageUpdate, in the runtime's .upd_info
+    # section: the newest GitHub release (pre-release or not) and the .zsync
+    # published beside the AppImage there
+    upd="gh-releases-zsync|thefixinhixon|UltraCombo|latest-all|UltraCombo-x86_64.AppImage.zsync"
+    cp "$prog" dist/runtime.tmp
+    set -- $(readelf -SW dist/runtime.tmp | sed -n 's/.*\] \.upd_info *[A-Z]* *[0-9a-f]* \([0-9a-f]*\) \([0-9a-f]*\).*/\1 \2/p')
+    [ $# = 2 ] && [ ${#upd} -lt $((0x$2)) ] || { echo "no room for update information in $prog" >&2; exit 1; }
+    printf '%s' "$upd" | dd of=dist/runtime.tmp bs=1 seek=$((0x$1)) conv=notrunc status=none
+    cat dist/runtime.tmp dist/appimage.sqfs > "$image"
     chmod +x "$image"
-    rm -f dist/appimage.sqfs
-    echo "packaged $image ($(du -h "$image" | cut -f1))"
+    rm -f dist/appimage.sqfs dist/runtime.tmp
+    (cd dist && rm -f UltraCombo-x86_64.AppImage.zsync && "$zsyncmake" -u UltraCombo-x86_64.AppImage UltraCombo-x86_64.AppImage)
+    echo "packaged $image ($(du -h "$image" | cut -f1)) and its .zsync"
     exit 0 ;;
 *) echo "usage: $0 linux|windows|appimage ..." >&2; exit 1 ;;
 esac

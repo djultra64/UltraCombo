@@ -140,13 +140,17 @@ Useful environment variables:
 
 Packages (no game files, no game code):
 
-    make packages        # dist/UltraCombo-Windows.zip, -Linux.tar.xz, -x86_64.AppImage
+    make packages        # dist/UltraCombo-Windows.zip, -Linux.tar.xz, -x86_64.AppImage (+ .zsync)
 
 These need, in `deps/`:
 - Zig 0.17 for Linux and Windows;
 - `libtcc.so` built with Zig against glibc 2.31 (`tcc-lnx231/`), and `libtcc.dll` (`tcc-win/`);
 - SDL2 2.32.10 built with Zig (`sdl2-lnx/`), and the SDL2 MinGW package (`sdl2-mingw/`);
 - the AppImage type2 runtime (`dl/appimage-runtime/`).
+
+And `zsyncmake`: package `zsync`, or that package unpacked into `deps/zsync`. Every release must carry
+`UltraCombo-x86_64.AppImage.zsync` beside the AppImage: the AppImage's
+update information points at it.
 
 See README.md, "Release packages". The Linux program targets glibc 2.31. Check
 any new library call with `objdump -T` (the most it may need is GLIBC_2.29).
