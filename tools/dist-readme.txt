@@ -41,6 +41,9 @@ that folder is writable, otherwise into your user data folder:
 Linux: needs glibc 2.29 or newer (distributions from about 2020 on). SDL2
 is included, in lib/.
 
+The artwork/ folder contains the optional lightning background and its MIT
+licence. Graphics > Background art switches it on or off.
+
 Press F1 in the game for the menu. README.md has the full manual.
 
 Killer Instinct is a trademark of its owners. This project is not

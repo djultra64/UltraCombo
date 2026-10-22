@@ -88,6 +88,7 @@ static void build_table(void)
     add("video", "window_w", T_INT, &cfg.window_w, "0", 0, 0);
     add("video", "window_h", T_INT, &cfg.window_h, "0", 0, 0);
     add("video", "scale", T_ENUM, &cfg.scale_mode, "fit", "fit (largest 4:3), integer (sharpest, may border), stretch", scale_names);
+    add("video", "artwork", T_BOOL, &cfg.artwork, "on", "lightning artwork and shadow behind the game", NULL);
     add_str("video", "shader", cfg.shader, "", "a libretro .glslp preset under shaders/ (overrides filter), e.g. shaders/crt/crt-lottes.glslp");
     add_str("video", "shader_params", cfg.shader_params, "", "adjusted shader parameters (set from the menu)");
     add("video", "filter", T_ENUM, &cfg.filter, "sharp",

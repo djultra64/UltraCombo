@@ -5,11 +5,20 @@
 #include "config.h"
 #include "gl_funcs.h"
 #include "shaders.h"
+#include "artwork.h"
+#include "third_party/stb_image.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 static SDL_Window *win;
 static bool use_gl;
+static SDL_Surface *art_source;
+static SDL_Texture *ren_art;
+static GLuint tex_art;
+static int art_w, art_h, art_scale;
+static bool art_ready;
+static bool prepare_artwork(int w, int h, int scale_mode);
+
 
 /* ---------------------------------------------------------------- */
 /* SDL_Renderer fallback                                            */
@@ -29,18 +38,21 @@ static bool sdl_init(void)
     return ren_game && ren_over;
 }
 
-static void sdl_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode)
+static void sdl_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode, bool artwork)
 {
-    if (scale_mode == SCALE_STRETCH) SDL_RenderSetLogicalSize(ren, 0, 0);
-    else SDL_RenderSetLogicalSize(ren, 320, 240);
-    SDL_RenderSetIntegerScale(ren, scale_mode == SCALE_INTEGER);
+    int w, h;
+    SDL_GetRendererOutputSize(ren, &w, &h);
+    SDL_Rect v=artwork_viewport(w,h,scale_mode);
+    if (w<=0 || h<=0 || v.w<=0 || v.h<=0) return;
+    bool background=artwork && prepare_artwork(w,h,scale_mode);
     SDL_SetTextureScaleMode(ren_game, filter == FILTER_SMOOTH ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
     SDL_UpdateTexture(ren_game, NULL, game, 320 * 4);
     SDL_UpdateTexture(ren_over, NULL, overlay, 320 * 4);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
-    SDL_RenderCopy(ren, ren_game, NULL, NULL);
-    SDL_RenderCopy(ren, ren_over, NULL, NULL);
+    if (background) SDL_RenderCopy(ren, ren_art, NULL, NULL);
+    SDL_RenderCopy(ren, ren_game, NULL, &v);
+    SDL_RenderCopy(ren, ren_over, NULL, &v);
     SDL_RenderPresent(ren);
 }
 
@@ -218,31 +230,81 @@ static bool gl_init(void)
     return true;
 }
 
-// Largest rectangle for the chosen scaling mode, centred.
-static SDL_Rect viewport(int w, int h, int scale_mode)
+// Rebuilt only when the drawable geometry/scaling changes, never per frame.
+static bool prepare_artwork(int w, int h, int scale_mode)
 {
-    SDL_Rect r = { 0, 0, w, h };
-    if (scale_mode == SCALE_STRETCH) return r;
-    int vw = w, vh = w * 3 / 4;
-    if (vh > h) { vh = h; vw = h * 4 / 3; }
-    if (scale_mode == SCALE_INTEGER && vw >= 320 && vh >= 240) {
-        int k = vw / 320 < vh / 240 ? vw / 320 : vh / 240;
-        vw = 320 * k; vh = 240 * k;
+    if (!art_source) return false;
+    SDL_Rect game=artwork_viewport(w,h,scale_mode);
+    if (game.w==w && game.h==h) return false;
+    if (w==art_w && h==art_h && scale_mode==art_scale) return art_ready;
+    art_w=w; art_h=h; art_scale=scale_mode; art_ready=false;
+    SDL_Surface *surface=artwork_compose(art_source,w,h,game);
+    if (!surface) return false;
+    if (use_gl) {
+        // Query the real limit before uploading (old GL 2.1 drivers can be small).
+        typedef void (APIENTRY *get_integer_t)(GLenum, GLint *);
+        get_integer_t get_integer=(get_integer_t)SDL_GL_GetProcAddress("glGetIntegerv");
+        GLint limit=0;
+        if (get_integer) get_integer(GL_MAX_TEXTURE_SIZE,&limit);
+        if (w<=limit && h<=limit) {
+            if (!tex_art) p_glGenTextures(1,&tex_art);
+            p_glActiveTexture(GL_TEXTURE0);
+            p_glBindTexture(GL_TEXTURE_2D,tex_art);
+            p_glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            p_glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            p_glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            p_glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+            p_glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,surface->pixels);
+            art_ready=true;
+        }
+    } else {
+        SDL_DestroyTexture(ren_art);
+        ren_art=SDL_CreateTextureFromSurface(ren,surface);
+        if (ren_art) { SDL_SetTextureBlendMode(ren_art,SDL_BLENDMODE_NONE); art_ready=true; }
     }
-    r.x = (w - vw) / 2; r.y = (h - vh) / 2; r.w = vw; r.h = vh;
-    return r;
+    SDL_FreeSurface(surface);
+    return art_ready;
 }
 
-static void gl_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode)
+static void load_artwork(void)
+{
+    char path[4096];
+    char *base=SDL_GetBasePath();
+    snprintf(path,sizeof path,"%sartwork/lightning.png",base ? base : "./");
+    SDL_free(base);
+    int w,h,n;
+    unsigned char *pixels=stbi_load(path,&w,&h,&n,4);
+    if (!pixels) { fprintf(stderr,"video: optional artwork unavailable: %s\n",path); return; }
+    SDL_Surface *loaded=SDL_CreateRGBSurfaceWithFormatFrom(pixels,w,h,32,w*4,SDL_PIXELFORMAT_RGBA32);
+    if (loaded) {
+        art_source=SDL_ConvertSurfaceFormat(loaded,SDL_PIXELFORMAT_RGBA32,0);
+        SDL_FreeSurface(loaded);
+    }
+    stbi_image_free(pixels);
+}
+
+static void gl_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode, bool artwork)
 {
     int w, h;
     SDL_GL_GetDrawableSize(win, &w, &h);
-    SDL_Rect v = viewport(w, h, scale_mode);
+    SDL_Rect v = artwork_viewport(w, h, scale_mode);
+    if (w<=0 || h<=0 || v.w<=0 || v.h<=0) return;
+    bool background=artwork && prepare_artwork(w,h,scale_mode);
     static const GLfloat quad[] = { -1, -1, 1, -1, -1, 1, 1, 1 };
 
     p_glViewport(0, 0, w, h);
     p_glClearColor(0, 0, 0, 1);
     p_glClear(GL_COLOR_BUFFER_BIT);
+    p_glDisable(GL_BLEND);
+    if (background) {
+        p_glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,0,quad);
+        p_glEnableVertexAttribArray(0);
+        p_glDisableVertexAttribArray(1);
+        p_glActiveTexture(GL_TEXTURE0);
+        p_glBindTexture(GL_TEXTURE_2D,tex_art);
+        p_glUseProgram(prog_over);
+        p_glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+    }
     p_glViewport(v.x, h - v.y - v.h, v.w, v.h);
     p_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
     p_glEnableVertexAttribArray(0);
@@ -288,10 +350,11 @@ SDL_Window *video_open(const char *title, int w, int h)
 {
     win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
-    if (win && !getenv("KI2_NO_GL") && gl_init()) { use_gl = true; return win; }
+    if (win && !getenv("KI2_NO_GL") && gl_init()) { use_gl = true; load_artwork(); return win; }
     if (ctx) { SDL_GL_DeleteContext(ctx); ctx = NULL; }
     if (!win) win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, SDL_WINDOW_RESIZABLE);
     if (!win || !sdl_init()) return NULL;
+    load_artwork();
     return win;
 }
 
@@ -301,10 +364,10 @@ void video_set_vsync(bool on)
     else SDL_RenderSetVSync(ren, on);
 }
 
-void video_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode)
+void video_present(const uint32_t *game, const uint32_t *overlay, int filter, int scale_mode, bool artwork)
 {
-    if (use_gl) gl_present(game, overlay, filter, scale_mode);
-    else sdl_present(game, overlay, filter, scale_mode);
+    if (use_gl) gl_present(game, overlay, filter, scale_mode, artwork);
+    else sdl_present(game, overlay, filter, scale_mode, artwork);
 }
 
 const char *video_backend(void) { return use_gl ? "OpenGL" : "SDL renderer"; }
@@ -320,6 +383,10 @@ bool video_shaders_supported(void) { return use_gl; }
 
 void video_close(void)
 {
-    if (ctx) SDL_GL_DeleteContext(ctx);
-    if (ren) SDL_DestroyRenderer(ren);
+    SDL_FreeSurface(art_source); art_source=NULL;
+    SDL_DestroyTexture(ren_art); ren_art=NULL;
+    art_ready=false; art_w=art_h=0;
+    if (ctx) { shader_unload(); if (tex_art) p_glDeleteTextures(1,&tex_art); tex_art=0; SDL_GL_DeleteContext(ctx); ctx=NULL; }
+    if (ren) { SDL_DestroyRenderer(ren); ren=NULL; }
+    use_gl=false; last_filter=-1;
 }

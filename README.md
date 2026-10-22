@@ -171,7 +171,7 @@ Each game keeps its own settings; changes made in the menu are saved to its
 ## The menu
 
 **Graphics:** fullscreen (borderless, or exclusive at a chosen display
-mode), window size, scaling (fit 4:3, integer, stretch), shader, shader
+mode), window size, scaling (fit 4:3, integer, stretch), background art, shader, shader
 parameters, frame pacing and the performance overlay.
 
 **Controls:** rebind both players' keys, the gamepad buttons and all hotkeys
@@ -199,6 +199,14 @@ together count as neither, up and down together as up, like fight sticks),
 The window's size and position are remembered between runs.
 
 ## Graphics
+
+**Background art** adds an optional lightning background behind the game, with
+a soft outer shadow that makes the 4:3 picture look raised above it. It is on
+by default; switch it off in Graphics to restore black borders. The background
+keeps its aspect ratio and is cropped to fill the window, while the game keeps
+its selected scaling. This works with OpenGL shaders and the SDL fallback.
+Artwork contributed by djultra64; provenance and MIT terms are in `artwork/`.
+
 
 **Shaders** are drawn by the GPU. Four are built in:
 

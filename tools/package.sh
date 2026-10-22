@@ -86,6 +86,7 @@ chdr=src/third_party/libchdr
 echo "TinyCC source: https://repo.or.cz/tinycc.git, commit e23dabe (built unmodified)" > "$out/tools/tcc/SOURCE.txt"
 
 # shaders; the GPL extras are shipped as the source files they are
+cp -r artwork "$out/"
 cp -r shaders "$out/"
 if [ -d shaders/extra ]; then
     cp tools/gpl-2.0.txt "$out/licenses/GPL-2.0-shaders-extra.txt"   # crt-guest, crt-royale, ...

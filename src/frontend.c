@@ -167,7 +167,7 @@ static void present(const char *status)
     draw_perf(ov);
     osd_draw(ov, status);
     draw_menu(ov);
-    video_present(px, ov, cfg.filter, cfg.scale_mode);
+    video_present(px, ov, cfg.filter, cfg.scale_mode, cfg.artwork);
 }
 
 static void screenshot(void)
@@ -483,7 +483,7 @@ static int versions_there(void)
 
 enum { M_RESUME, M_SAVE, M_LOAD, M_SLOT, M_GRAPHICS, M_CONTROLS, M_GAME, M_PRACTICE, M_NETPLAY, M_RESET, M_CHANGE, M_QUIT, M_COUNT };
 // Graphics
-enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
+enum { G_FULLSCREEN, G_MODE, G_WINDOW, G_SCALE, G_ARTWORK, G_SHADER, G_PARAMS, G_PACING, G_PERF, G_BACK, G_COUNT };
 // Controls
 enum { C_P1, C_P2, C_PAD, C_HOTKEYS, C_PADHOT, C_SOCD, C_RUMBLE, C_DEADZONE, C_BACK, C_COUNT };
 // Game & system
@@ -657,6 +657,7 @@ static void draw_menu(uint32_t *out)
         SDL_GetWindowSize(win, &ww, &wh);
         snprintf(b[G_WINDOW], 72, "Window size\t< %dx%d >", ww, wh);
         snprintf(b[G_SCALE], 72, "Scaling\t< %s >", scale_names[cfg.scale_mode]);
+        snprintf(b[G_ARTWORK], 72, "Background art\t< %s >", onoff[cfg.artwork]);
         shader_label(shader_index(), lbl, sizeof lbl);
         snprintf(b[G_SHADER], 72, "Shader\t< %s >", lbl);
         snprintf(b[G_PARAMS], 72, shader_param_count() ? "Shader parameters...\t%d" : "Shader parameters\t(none)", shader_param_count());
@@ -883,6 +884,7 @@ static void menu_change(int dir)
             break;
         }
         case G_SCALE: cycle(&cfg.scale_mode, 3, d); break;
+        case G_ARTWORK: cfg.artwork = !cfg.artwork; break;
         case G_SHADER: {
             if (nshaders < 0 || !dir) scan_shaders();
             int idx = shader_index(), total = NFILTERS + nshaders;
@@ -1279,7 +1281,7 @@ static int test_shaders(void)
         snprintf(path, sizeof path, "%s/%s", dir, names[i]);
         uint64_t t0 = SDL_GetPerformanceCounter();
         bool good = video_set_shader(path, err, sizeof err);
-        if (good) for (int k = 0; k < 3; k++) { to_rgb(px); osd_clear(ov); video_present(px, ov, cfg.filter, cfg.scale_mode); }
+        if (good) for (int k = 0; k < 3; k++) { to_rgb(px); osd_clear(ov); video_present(px, ov, cfg.filter, cfg.scale_mode, cfg.artwork); }
         double ms = (SDL_GetPerformanceCounter() - t0) * 1000.0 / SDL_GetPerformanceFrequency();
         printf("%-4s %-60s %6.1f ms  %d params%s%s\n", good ? "OK" : "FAIL", names[i], ms, good ? shader_param_count() : 0,
                good ? "" : "\n     ", good ? "" : err);
@@ -1306,7 +1308,7 @@ static void prepare_progress(const char *stage, double fraction)
     osd_box(ov, 50, 136, 220, 10, 0xff303040u);
     osd_box(ov, 51, 137, (int)(218 * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)), 8, 0xffc08020u);
     osd_text(ov, 160 - 24 * 3, 154, "THIS TAKES ABOUT A MINUTE", 0x808080);
-    video_present(px, ov, FILTER_SHARP, cfg.scale_mode);
+    video_present(px, ov, FILTER_SHARP, cfg.scale_mode, cfg.artwork);
 }
 
 // Use translated code for full speed: linked in, cached from an earlier run,

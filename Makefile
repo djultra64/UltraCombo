@@ -4,7 +4,7 @@ CFLAGS  += $(shell pkg-config --cflags sdl2)
 LDLIBS  += $(shell pkg-config --libs sdl2) -lm -ldl
 
 SRC = src/main.c src/cpu.c src/disasm.c src/mem.c src/ide.c src/dcs.c src/adsp.c src/rec.c \
-      src/frontend.c src/config.c src/osd.c src/png.c src/state.c src/video.c src/shaders.c src/icon.c src/adjust.c src/recomp.c src/rec_build.c src/training.c src/net.c src/netplay.c \
+      src/frontend.c src/config.c src/osd.c src/png.c src/state.c src/video.c src/artwork.c src/shaders.c src/icon.c src/adjust.c src/recomp.c src/rec_build.c src/training.c src/net.c src/netplay.c \
       src/game.c src/game_ki1.c src/game_ki2.c src/picker.c
 OBJ = $(SRC:src/%.c=build/%.o) build/rec_headers.o build/libchdr.o
 
@@ -62,7 +62,7 @@ build:
 
 # Synthetic state-file tests do not need SDL or game files.
 .PHONY: test test-state-files
-test: test-state-files
+test: test-state-files test-artwork
 
 test-state-files: build/test_state_files
 	./build/test_state_files build/test-state-files.tmp
@@ -79,6 +79,7 @@ WIN_LIBS   = -L$(WIN_SDL)/lib -lmingw32 -lSDL2main -lSDL2 -lws2_32 -mwindows -st
 WIN_OBJ     = $(SRC:src/%.c=build-win/%.o) build-win/rec_headers.o build-win/rec_none.o build-win/libchdr.o
 
 windows: dist/windows/UltraCombo.exe
+	cp -r artwork dist/windows/
 
 # no game code inside: UltraCombo.exe builds it on the player's PC at first launch
 dist/windows/UltraCombo.exe: $(WIN_OBJ) build-win/ki2-res.o
@@ -166,3 +167,30 @@ shaders-lola:
 	python3 tools/lola_retro.py $(LOLA_REPO) shaders/lola-retro
 
 .PHONY: all clean recomp windows shaders-extra shaders-lola package-linux package-appimage package-windows packages
+
+.PHONY: test-artwork
+test-artwork: build/test_artwork
+	./build/test_artwork
+
+build/test_artwork: tests/test_artwork.c src/artwork.c src/artwork.h src/config.h | build
+	$(CC) $(CFLAGS) -Isrc src/artwork.c tests/test_artwork.c -o $@ $(LDLIBS)
+
+# Isolated display test: no ROMs, CHDs or desktop automation.
+.PHONY: test-video-artwork
+test-video-artwork: build/test_video_artwork build/artwork/lightning.png
+	python3 tools/test_video_artwork.py ./build/test_video_artwork
+
+build/test_video_artwork: tests/test_video_artwork.c src/video.c src/artwork.c src/shaders.c src/*.h | build
+	$(CC) $(CFLAGS) -Isrc tests/test_video_artwork.c src/artwork.c src/shaders.c -o $@ $(LDLIBS)
+
+build/artwork/lightning.png: artwork/lightning.png | build
+	mkdir -p build/artwork
+	cp $< $@
+
+.PHONY: test-artwork-config
+test: test-artwork-config
+test-artwork-config: build/test_artwork_config
+	./build/test_artwork_config build/test-artwork.ini
+
+build/test_artwork_config: tests/test_artwork_config.c src/config.c src/game.c src/game_ki1.c src/game_ki2.c src/*.h | build
+	$(CC) $(CFLAGS) -Isrc tests/test_artwork_config.c src/config.c src/game.c src/game_ki1.c src/game_ki2.c -o $@ $(LDLIBS)

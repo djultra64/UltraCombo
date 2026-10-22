@@ -32,6 +32,7 @@ typedef struct {
     int  window_scale;
     int  window_x, window_y, window_w, window_h;   // last windowed geometry (0 = default)
     int  scale_mode;
+    bool artwork;              // optional background and raised-panel shadow
     int  filter;               // FILTER_* (video.h), used when no shader preset is set
     char shader[1024];         // libretro .glslp preset, relative to the program folder
     char shader_params[1024];  // "name=value;..." changed parameters of that preset
